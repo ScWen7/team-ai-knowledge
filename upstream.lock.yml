@@ -1,0 +1,10 @@
+project_wiki:
+  repository: giodra96/project-wiki
+  ref: 09f24a20e7790e1a0215d28644333eb6ad1bb543
+  upstream_schema: "1.6.0"
+llm_wiki:
+  repository: nashsu/llm_wiki
+  ref: e8082119649e6a8e1cf85eaf289adcabfdf39d4e
+notes:
+  - "V0.1 does not copy upstream implementation code."
+  - "Future reuse must record module-level license and test obligations."
