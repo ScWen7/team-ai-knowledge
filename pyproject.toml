@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "team-ai-knowledge-kit"
+version = "0.1.0"
+description = "Deterministic local toolkit for a Git-based team AI knowledge base"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.scripts]
+team-wiki = "team_wiki.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
