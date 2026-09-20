@@ -42,3 +42,14 @@ team-wiki prepare ./demo --goal "验证一项知识工作"
 ## V0.2 分支
 
 当前实现位于 `feature/v0.2-knowledge-loop`，详见 `docs/V0.2_SCOPE.md`。合并前需确认 GPLv3 适配代码的整体分发许可证策略。
+
+
+## License
+
+从 V0.2 起，本仓库以 GNU GPL v3 发布。原因是 V0.2 开始包含基于 `nashsu/llm_wiki` GPLv3 源码适配的模块。
+
+- project-wiki 来源部分继续保留其 MIT 声明；
+- llm_wiki 适配模块保留 GPLv3 来源和修改说明；
+- 详细第三方声明见 `third-party-notices/`。
+
+这是一项工程分发策略，不替代组织自身的法律审查。
