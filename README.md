@@ -36,4 +36,9 @@ team-wiki search ./demo "订单 导入"
 team-wiki prepare ./demo --goal "验证一项知识工作"
 ```
 
-> V0.1 没有实现 LLM 编译、关系评分、Review 语义判断、LanceDB 或 MCP。它只用于验证统一目录与确定性纵向切片。
+> V0.2 已增加 project-wiki source-scope 适配、llm_wiki 关系/字符预算适配，以及 Work → Evidence → Observation → Change 最小闭环。完整自动编译、Review 重开、LanceDB、MCP 与 CI 门禁仍未实现。
+
+
+## V0.2 分支
+
+当前实现位于 `feature/v0.2-knowledge-loop`，详见 `docs/V0.2_SCOPE.md`。合并前需确认 GPLv3 适配代码的整体分发许可证策略。
