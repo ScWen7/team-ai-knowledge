@@ -11,4 +11,4 @@ V0.2 knowledge-core modules are adapted from:
 
 Adaptations remove desktop filesystem/UI/runtime dependencies and replace basename identity with the normalized team-wiki knowledge ID input contract.
 
-This notice is not a substitute for selecting and publishing the repository's overall distribution license before a stable V0.2 release.
+The repository adopts GNU GPL v3 for V0.2 distribution. This notice preserves the llm_wiki source provenance and modification boundary.
