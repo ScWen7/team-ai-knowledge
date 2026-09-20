@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.2.0"
+KIT_VERSION = "0.3.0"
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
@@ -127,6 +127,7 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
         ensure_file(root / "wiki" / rel / "INDEX.md", f"# {title}\n\n暂无条目。\n")
     ensure_file(root / "sources/INDEX.md", "# Sources Index\n\n> 由 `team-wiki index` 更新。\n")
     ensure_file(root / "changes/INDEX.md", "# Changes Index\n\n> 由 `team-wiki index` 更新。\n")
+    ensure_file(root / "changes/reviews/INDEX.md", "# Reviews Index\\n\\n> 由 `team-wiki index` 更新。\\n")
     for name, title in [
         ("open.md", "Open Changes"),
         ("blocked.md", "Blocked Changes"),
@@ -288,6 +289,24 @@ def index_workspace(root: Path) -> None:
         "# Recently Published\n\n" + ("\n".join(published[-20:]) if published else "暂无。") + "\n",
         encoding="utf-8",
     )
+
+    try:
+        from .review import list_reviews
+        review_rows = []
+        for item in list_reviews(root):
+            review_path = Path(item["path"])
+            rel = review_path.relative_to("changes/reviews")
+            review_rows.append(
+                f"- \`{item['review_id']}\` "
+                f"[{item['title']}]({rel.as_posix()}) "
+                f"— \`{item['state']}\` — {item.get('owner') or 'unassigned'}"
+            )
+        (root / "changes/reviews/INDEX.md").write_text(
+            "# Reviews Index\\n\\n" + ("\\n".join(review_rows) if review_rows else "暂无 Review。") + "\\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 
 def create_change(root: Path, title: str, owner: str = "unassigned") -> Path:
@@ -479,6 +498,13 @@ def doctor(root: Path) -> CheckResult:
             warnings.append("Node.js knowledge-core unavailable: relation/context-budget features are disabled")
     except Exception as exc:
         warnings.append(f"cannot inspect Node.js knowledge-core: {exc}")
+    try:
+        from .review import list_reviews
+        for item in list_reviews(root):
+            if item.get("state") not in {"open", "in-progress", "blocked", "resolved", "dismissed"}:
+                errors.append(f"invalid review state: {item.get('review_id')}={item.get('state')}")
+    except Exception as exc:
+        warnings.append(f"cannot inspect review records: {exc}")
     return CheckResult(not errors, errors, warnings)
 
 
