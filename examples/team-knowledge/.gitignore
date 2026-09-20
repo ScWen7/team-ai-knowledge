@@ -1,0 +1,6 @@
+.knowledge/local.yml
+.knowledge/runs/
+.knowledge/cache/
+.venv/
+__pycache__/
+*.pyc
