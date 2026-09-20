@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.1.0"
+KIT_VERSION = "0.2.0"
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
@@ -473,4 +473,216 @@ def doctor(root: Path) -> CheckResult:
     inbox = root / "sources/inbox"
     if inbox.exists() and len([p for p in inbox.iterdir() if p.is_file()]) > 20:
         warnings.append("inbox backlog exceeds 20 files")
+    try:
+        from .node_core import available as node_core_available
+        if not node_core_available():
+            warnings.append("Node.js knowledge-core unavailable: relation/context-budget features are disabled")
+    except Exception as exc:
+        warnings.append(f"cannot inspect Node.js knowledge-core: {exc}")
     return CheckResult(not errors, errors, warnings)
+
+
+# --- V0.2: normalized knowledge graph + work/evidence loop ---
+
+def knowledge_ref(root: Path, knowledge_id: str) -> tuple[Path, dict[str, Any], str]:
+    for path in iter_knowledge_files(root):
+        meta, _ = parse_frontmatter(path)
+        if meta.get("id") == knowledge_id:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            return path, meta, digest
+    raise KeyError(f"knowledge id not found: {knowledge_id}")
+
+
+def build_relationship_nodes(root: Path) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    raw_out: dict[str, set[str]] = {}
+    metas: dict[str, dict[str, Any]] = {}
+    paths: dict[str, Path] = {}
+    for path in iter_knowledge_files(root):
+        meta, _ = parse_frontmatter(path)
+        kid = meta.get("id")
+        if not kid:
+            continue
+        kid = str(kid)
+        metas[kid] = meta
+        paths[kid] = path
+        links: set[str] = set()
+        for item in meta.get("related", []) or []:
+            if isinstance(item, str):
+                links.add(item)
+            elif isinstance(item, dict) and item.get("id"):
+                links.add(str(item["id"]))
+        for item in meta.get("references", []) or []:
+            if isinstance(item, dict) and item.get("id") and item.get("relation") in {"related", "related_to", "depends_on", "supersedes"}:
+                links.add(str(item["id"]))
+        raw_out[kid] = links
+
+    incoming: dict[str, set[str]] = {kid: set() for kid in metas}
+    for src, targets in raw_out.items():
+        for target in targets:
+            if target in incoming and target != src:
+                incoming[target].add(src)
+
+    for kid, meta in metas.items():
+        sources: list[str] = []
+        for item in meta.get("source_paths", []) or []:
+            sources.append(str(item))
+        for item in meta.get("evidence", []) or []:
+            if isinstance(item, str):
+                sources.append(item)
+            elif isinstance(item, dict):
+                sid = item.get("source_id") or item.get("id")
+                if sid:
+                    sources.append(str(sid))
+        nodes.append({
+            "id": kid,
+            "title": meta.get("title") or paths[kid].stem,
+            "type": str(meta.get("type", "other")),
+            "path": str(paths[kid].relative_to(root)),
+            "sources": sorted(set(sources)),
+            "outLinks": sorted(t for t in raw_out.get(kid, set()) if t in metas and t != kid),
+            "inLinks": sorted(incoming.get(kid, set())),
+        })
+    return nodes
+
+
+def related(root: Path, knowledge_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    from .node_core import related_nodes
+    rows = related_nodes(knowledge_id, build_relationship_nodes(root), limit)
+    return [
+        {
+            "id": row["node"]["id"],
+            "title": row["node"]["title"],
+            "path": row["node"]["path"],
+            "relevance": row["relevance"],
+        }
+        for row in rows
+    ]
+
+
+def context_plan(root: Path, query: str, max_context_size: int | None = None, limit: int = 5) -> dict[str, Any]:
+    from .node_core import context_budget
+    direct = search(root, query)[:limit]
+    related_rows: dict[str, list[dict[str, Any]]] = {}
+    for row in direct[:2]:
+        if row.get("id"):
+            related_rows[str(row["id"])] = related(root, str(row["id"]), limit=3)
+    return {
+        "budget": context_budget(max_context_size),
+        "direct": direct,
+        "related": related_rows,
+        "complete": False,
+        "note": "V0.2 returns a retrieval plan; the current Agent decides what to read and cite.",
+    }
+
+
+def _work_path(root: Path, work_id: str) -> Path:
+    path = root / ".knowledge/runs" / f"{work_id}.yml"
+    if not path.exists():
+        raise KeyError(f"work id not found: {work_id}")
+    return path
+
+
+def adopt_knowledge(root: Path, work_id: str, knowledge_id: str, used_for: str) -> dict[str, Any]:
+    path = _work_path(root, work_id)
+    work = read_yaml(path)
+    kpath, meta, digest = knowledge_ref(root, knowledge_id)
+    adopted = work.setdefault("adopted", [])
+    entry = next((x for x in adopted if x.get("knowledge_id") == knowledge_id), None)
+    if entry is None:
+        entry = {
+            "repository_id": read_yaml(root / ".knowledge/config.yml").get("repository_id"),
+            "knowledge_id": knowledge_id,
+            "path": str(kpath.relative_to(root)),
+            "content_sha256": digest,
+            "status_at_use": meta.get("status"),
+            "used_for": used_for,
+            "outcome": "not-verified",
+            "evidence_ids": [],
+            "observations": [],
+        }
+        adopted.append(entry)
+    else:
+        entry["used_for"] = used_for
+    write_yaml(path, work)
+    return entry
+
+
+def record_evidence(root: Path, work_id: str, kind: str, locator: str, summary: str) -> Path:
+    _work_path(root, work_id)
+    eid = f"E-{short_hash((work_id + '|' + kind + '|' + locator + '|' + summary).encode())}"
+    path = root / ".knowledge/records/evidence" / f"{eid}.yml"
+    if not path.exists():
+        write_yaml(path, {
+            "evidence_id": eid,
+            "work_id": work_id,
+            "kind": kind,
+            "locator": locator,
+            "summary": summary,
+            "created": utc_now(),
+        })
+    work_path = _work_path(root, work_id)
+    work = read_yaml(work_path)
+    evidence = work.setdefault("evidence_ids", [])
+    if eid not in evidence:
+        evidence.append(eid)
+        write_yaml(work_path, work)
+    return path
+
+
+ALLOWED_OUTCOMES = {"not-verified", "supported-in-scope", "boundary-found", "contradicted", "not-applicable"}
+
+
+def observe_knowledge(root: Path, work_id: str, knowledge_id: str, outcome: str, note: str, evidence_ids: list[str] | None = None) -> dict[str, Any]:
+    if outcome not in ALLOWED_OUTCOMES:
+        raise ValueError(f"invalid outcome: {outcome}")
+    path = _work_path(root, work_id)
+    work = read_yaml(path)
+    entry = next((x for x in work.get("adopted", []) if x.get("knowledge_id") == knowledge_id), None)
+    if entry is None:
+        raise ValueError(f"knowledge {knowledge_id} was not adopted in {work_id}")
+    ids = list(dict.fromkeys(evidence_ids or []))
+    records = root / ".knowledge/records/evidence"
+    for eid in ids:
+        if not (records / f"{eid}.yml").exists():
+            raise ValueError(f"evidence id not found: {eid}")
+    entry["outcome"] = outcome
+    entry["evidence_ids"] = list(dict.fromkeys([*(entry.get("evidence_ids") or []), *ids]))
+    entry.setdefault("observations", []).append({"at": utc_now(), "outcome": outcome, "note": note, "evidence_ids": ids})
+    write_yaml(path, work)
+    return entry
+
+
+def _rewrite_change_meta(path: Path, updates: dict[str, Any]) -> None:
+    meta, body = parse_frontmatter(path)
+    meta.update(updates)
+    path.write_text("---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False).rstrip() + "\n---\n" + body, encoding="utf-8")
+
+
+def finalize_work(root: Path, work_id: str, owner: str = "unassigned") -> dict[str, Any]:
+    path = _work_path(root, work_id)
+    work = read_yaml(path)
+    created: list[str] = []
+    for item in work.get("adopted", []) or []:
+        if item.get("outcome") not in {"boundary-found", "contradicted"}:
+            continue
+        kid = item["knowledge_id"]
+        title = f"复核知识 {kid}: {item.get('outcome')}"
+        change = create_change(root, title, owner)
+        change_meta, _ = parse_frontmatter(change)
+        _rewrite_change_meta(change, {
+            "origin": {"work_ids": [work_id], "source_ids": []},
+            "affected": [{
+                "repository_id": item.get("repository_id"),
+                "knowledge_id": kid,
+                "content_sha256": item.get("content_sha256"),
+            }],
+            "evidence_ids": item.get("evidence_ids", []),
+        })
+        created.append(change_meta["change_id"])
+    work["state"] = "finalized"
+    work["finalized"] = utc_now()
+    work["changes"] = list(dict.fromkeys([*(work.get("changes") or []), *created]))
+    write_yaml(path, work)
+    index_workspace(root)
+    return {"work_id": work_id, "changes": created, "state": work["state"]}
