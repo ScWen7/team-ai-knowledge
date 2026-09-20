@@ -1,0 +1,13 @@
+version: 1
+repository_id: demo-team
+profile: team
+language: zh-CN
+paths:
+  knowledge: wiki
+  sources: sources
+  changes: changes
+  reviews: changes/reviews
+  shared_records: .knowledge/records
+  local_runs: .knowledge/runs
+  cache: .knowledge/cache
+knowledge_sources: []
