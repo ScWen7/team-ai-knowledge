@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "team-ai-knowledge-kit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Deterministic local toolkit for a Git-based team AI knowledge base"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
@@ -14,3 +14,6 @@ team-wiki = "team_wiki.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+team_wiki = ["knowledge_core/*.mjs"]
