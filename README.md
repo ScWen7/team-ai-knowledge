@@ -53,3 +53,15 @@ team-wiki prepare ./demo --goal "验证一项知识工作"
 - 详细第三方声明见 `third-party-notices/`。
 
 这是一项工程分发策略，不替代组织自身的法律审查。
+
+
+## V0.3
+
+当前 V0.3 分支继续补齐知识闭环：
+
+- Review 稳定身份与新证据重开；
+- 来源修订影响追踪；
+- Text/Markdown intake 分块与 review-progress；
+- 确定性 GitHub Actions 回归。
+
+详见 `docs/V0.3_SCOPE.md`。
