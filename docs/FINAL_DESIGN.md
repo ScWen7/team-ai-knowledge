@@ -911,3 +911,139 @@ Source
 ```
 
 下一阶段重点从“把链路接起来”转向“提高多人、多项目下的治理质量”：依赖 Review 修订、项目 adoption requirement 门禁、知识锁版本以及冲突批次处理。
+
+
+---
+
+## 24. 项目侧知识消费治理
+
+V0.7 将团队知识从“已经发布、可被项目采用”进一步推进为“项目按精确版本消费，并受更新要求约束”。
+
+### 24.1 项目显式声明消费边界
+
+项目 Profile 必须声明：
+
+```yaml
+knowledge_sources:
+  - repository_id: team-knowledge
+    knowledge_ids:
+      - K-A
+      - K-B
+```
+
+首版不允许 Agent 在任务开始时自行省略明确声明的知识。自动 scope/rule selection 后续只能在该显式边界内扩展。
+
+### 24.2 Knowledge Lock 是项目知识基线
+
+项目提交：
+
+```
+.knowledge/knowledge.lock.yml
+```
+
+每条锁定项指向一个精确 Publication：
+
+```text
+knowledge_id
+ + publication_id
+ + published_ref
+ + content_sha256
+ + adoption_requirement
+```
+
+因此项目的知识基础可以随代码一起审查、比较和回滚。
+
+本地 team-knowledge checkout 路径仍属于本机配置，不进入共享 lock。
+
+### 24.3 更新要求成为真实门禁
+
+Publication 的 adoption requirement 在项目侧解释为：
+
+| Requirement | Task start | Release |
+|---|---|---|
+| notice | 允许，warning | 允许，warning |
+| review-required | 允许，warning | 必须 accept 或有理由 defer |
+| must-address | 阻断 | 阻断，必须升级 |
+
+Defer 只对具体的旧 Publication → 新 Publication 生效，不自动覆盖后续版本。
+
+### 24.4 生效时间与最新版本分开
+
+项目同时认识：
+
+- latest effective Publication；
+- scheduled future Publication。
+
+如果 v2 已生效、v3 未来生效，项目必须先处理 v2，不能因为 v3 更新而把 v2 隐藏。
+
+初次 lock 只选择已经生效的 Publication，不提前消费未来规则。
+
+### 24.5 Task Snapshot 禁止中途静默切换
+
+Project Work 开始时固定：
+
+- knowledge.lock SHA；
+- lock 完整内容；
+- project git 状态；
+- kit version。
+
+任务读取知识时，不读取 team-knowledge 当前工作树，而是从锁定 Publication 的 Git commit 精确读取正文并重新验证 hash。
+
+如果 task start 后项目升级 lock：
+
+```text
+work.lock_sha != current knowledge.lock sha
+```
+
+则旧 Work 不能 finalize，需要重新 prepare。这样一个 Work 不会同时使用两个团队知识版本。
+
+### 24.6 Start Gate 与 Release Gate 分离
+
+Start Gate 解决“现在是否允许开始工作”。
+
+Release Gate 解决“这次交付是否已经处理了必须处理的团队知识更新”。
+
+这允许 review-required 在开发早期先提示、在最终交付前强制完成决策；must-address 则从任务开始就阻断。
+
+### 24.7 项目采用结果回到团队知识库
+
+Project Work 本身继续留在项目本地。
+
+但 finalize 会将真正采用的 Publication 提炼为团队 Adoption Record：
+
+```text
+project consumer
+ + publication
+ + used_for
+ + outcome
+ + evidence
+```
+
+因此团队可以看到一条知识：
+
+- 发布到哪里；
+- 哪些项目仍锁旧版本；
+- 哪些项目明确 defer；
+- 哪些项目已经采用；
+- 采用后的结果是 supported、boundary 还是 contradicted。
+
+### 24.8 V0.7 后的闭环
+
+```text
+Team Knowledge
+  → Publication
+  → Project knowledge.lock
+  → Project start gate
+  → exact historical context
+  → Project Work
+  → adopt / observe
+  → new Publication
+  → notice / review-required / must-address
+  → accept / defer / block
+  → release gate
+  → finalize
+  → Team Adoption Record
+  → new Evidence / next CHG
+```
+
+下一阶段重点是把这些确定性门禁接到项目 CI/required check，并增加适用规则选择、approved exception 和项目侧反馈自动回流。
