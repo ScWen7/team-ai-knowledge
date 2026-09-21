@@ -19,7 +19,7 @@ from .core import (
 )
 from .impact import refresh_source
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
-from .intake import apply_disposition, audit_intake, intake_source, intake_status
+from .intake import apply_disposition, audit_intake, intake_source, intake_status, source_pipeline_status
 from .node_core import context_budget
 from .review import list_reviews, resolve_review, upsert_review
 from .scope import SourceScope, SourceScopeError
@@ -37,6 +37,7 @@ def main():
     x = sub.add_parser("doctor"); x.add_argument("root")
     x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true"); x.add_argument("--connector", default="manual"); x.add_argument("--upstream-id"); x.add_argument("--logical-path")
     x = sub.add_parser("refresh-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("file"); x.add_argument("--owner", default="unassigned")
+    x = sub.add_parser("source-status"); x.add_argument("root"); x.add_argument("source_id")
     x = sub.add_parser("intake-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("--max-chars", type=int, default=4000)
     x = sub.add_parser("intake-status"); x.add_argument("root"); x.add_argument("intake_id")
     x = sub.add_parser("intake-apply"); x.add_argument("root"); x.add_argument("intake_id"); x.add_argument("chunk_id"); x.add_argument("--status", required=True); x.add_argument("--note"); x.add_argument("--knowledge", action="append", default=[])
@@ -77,6 +78,7 @@ def main():
             r = doctor(root); dump({"ok": r.ok, "errors": r.errors, "warnings": r.warnings}); raise SystemExit(0 if r.ok else 1)
         elif a.cmd == "ingest": print(register_source(root, Path(a.file).resolve(), a.title, a.move, connector_id=a.connector, upstream_id=a.upstream_id, logical_path=a.logical_path)); index_workspace(root)
         elif a.cmd == "refresh-source": dump(refresh_source(root, a.source_id, Path(a.file).resolve(), owner=a.owner))
+        elif a.cmd == "source-status": dump(source_pipeline_status(root, a.source_id))
         elif a.cmd == "intake-source": print(intake_source(root, a.source_id, max_chars=a.max_chars))
         elif a.cmd == "intake-status": dump(intake_status(root, a.intake_id))
         elif a.cmd == "intake-apply": dump(apply_disposition(root, a.intake_id, a.chunk_id, status=a.status, note=a.note, knowledge_ids=a.knowledge))
