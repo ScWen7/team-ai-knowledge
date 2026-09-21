@@ -291,9 +291,18 @@ def index_workspace(root: Path) -> None:
     for meta in sorted((root / "sources").rglob("source.yml")):
         data = read_yaml(meta)
         rel = meta.parent.relative_to(root / "sources")
+        origin = data.get("origin") or {}
+        logical_path = origin.get("logical_path") if isinstance(origin, dict) else None
+        connector = origin.get("connector_id") if isinstance(origin, dict) else None
+        details = []
+        if connector:
+            details.append(f"connector={connector}")
+        if logical_path:
+            details.append(f"path={logical_path}")
+        suffix_text = f" — {'; '.join(details)}" if details else ""
         src_rows.append(
             f"- `{data.get('source_id','?')}` {data.get('title','')} — "
-            f"`{data.get('status','?')}` — `{rel}`"
+            f"`{data.get('status','?')}` — `{rel}`{suffix_text}"
         )
     (root / "sources/INDEX.md").write_text(
         "# Sources Index\n\n" + ("\n".join(src_rows) if src_rows else "暂无已登记来源。") + "\n",
@@ -340,9 +349,9 @@ def index_workspace(root: Path) -> None:
             review_path = Path(item["path"])
             rel = review_path.relative_to("changes/reviews")
             review_rows.append(
-                f"- \`{item['review_id']}\` "
+                f"- `{item['review_id']}` "
                 f"[{item['title']}]({rel.as_posix()}) "
-                f"— \`{item['state']}\` — {item.get('owner') or 'unassigned'}"
+                f"— `{item['state']}` — {item.get('owner') or 'unassigned'}"
             )
         (root / "changes/reviews/INDEX.md").write_text(
             "# Reviews Index\\n\\n" + ("\\n".join(review_rows) if review_rows else "暂无 Review。") + "\\n",
