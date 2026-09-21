@@ -81,3 +81,23 @@ V0.4 引入 Evidence Layer：
 - source-status 区分 acquisition / processing / evidence / indexing / knowledge-change。
 
 WeKnora 作为来源/证据处理的设计参考，不作为第三个必须运行的平台。详见 `docs/V0.4_SCOPE.md`。
+
+
+## V0.5
+
+V0.5 打通两条链路：
+
+- **Evidence → Candidate → Knowledge Patch Plan → stale-safe apply**；
+- **Local Git Connector → checkpoint → incremental add/modify/rename/delete**。
+
+关键边界：
+
+- Candidate/Comparison 由当前 Agent 或领域责任人明确，不由确定性脚本猜业务语义；
+- Patch Plan 同时锁定目标 Knowledge base hash 和 Evidence current hash；
+- `patch-apply` 只修改贡献工作区并把 CHG 推进到 proposed，不等于发布；
+- Git Connector 只在整批事件成功后推进 checkpoint；
+- rename 保持 source_id；
+- rename 移出 scope 与真正 delete 分开处理；
+- 没有知识依赖的来源更新不自动制造 CHG/Review。
+
+详见 `docs/V0.5_SCOPE.md`。
