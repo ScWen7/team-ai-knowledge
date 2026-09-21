@@ -18,6 +18,7 @@ from .core import (
     search,
 )
 from .impact import refresh_source
+from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
 from .intake import apply_disposition, audit_intake, intake_source, intake_status
 from .node_core import context_budget
 from .review import list_reviews, resolve_review, upsert_review
@@ -34,12 +35,16 @@ def main():
 
     x = sub.add_parser("init"); x.add_argument("root"); x.add_argument("--repository-id")
     x = sub.add_parser("doctor"); x.add_argument("root")
-    x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true")
+    x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true"); x.add_argument("--connector", default="manual"); x.add_argument("--upstream-id"); x.add_argument("--logical-path")
     x = sub.add_parser("refresh-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("file"); x.add_argument("--owner", default="unassigned")
     x = sub.add_parser("intake-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("--max-chars", type=int, default=4000)
     x = sub.add_parser("intake-status"); x.add_argument("root"); x.add_argument("intake_id")
     x = sub.add_parser("intake-apply"); x.add_argument("root"); x.add_argument("intake_id"); x.add_argument("chunk_id"); x.add_argument("--status", required=True); x.add_argument("--note"); x.add_argument("--knowledge", action="append", default=[])
     x = sub.add_parser("intake-audit"); x.add_argument("root"); x.add_argument("intake_id")
+    x = sub.add_parser("evidence-show"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--raw", action="store_true")
+    x = sub.add_parser("evidence-correct"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--text-file", required=True); x.add_argument("--reason", required=True); x.add_argument("--verified-by", required=True)
+    x = sub.add_parser("evidence-bind"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--target-kind", required=True); x.add_argument("--target-id", required=True); x.add_argument("--relation", required=True); x.add_argument("--note", default="")
+    x = sub.add_parser("evidence-bindings"); x.add_argument("root"); x.add_argument("--evidence-id"); x.add_argument("--target-id")
 
     x = sub.add_parser("index"); x.add_argument("root")
     x = sub.add_parser("change"); x.add_argument("root"); x.add_argument("title"); x.add_argument("--owner", default="unassigned")
@@ -70,12 +75,19 @@ def main():
         if a.cmd == "init": init_team(root, a.repository_id); index_workspace(root); print(root)
         elif a.cmd == "doctor":
             r = doctor(root); dump({"ok": r.ok, "errors": r.errors, "warnings": r.warnings}); raise SystemExit(0 if r.ok else 1)
-        elif a.cmd == "ingest": print(register_source(root, Path(a.file).resolve(), a.title, a.move)); index_workspace(root)
+        elif a.cmd == "ingest": print(register_source(root, Path(a.file).resolve(), a.title, a.move, connector_id=a.connector, upstream_id=a.upstream_id, logical_path=a.logical_path)); index_workspace(root)
         elif a.cmd == "refresh-source": dump(refresh_source(root, a.source_id, Path(a.file).resolve(), owner=a.owner))
         elif a.cmd == "intake-source": print(intake_source(root, a.source_id, max_chars=a.max_chars))
         elif a.cmd == "intake-status": dump(intake_status(root, a.intake_id))
         elif a.cmd == "intake-apply": dump(apply_disposition(root, a.intake_id, a.chunk_id, status=a.status, note=a.note, knowledge_ids=a.knowledge))
         elif a.cmd == "intake-audit": dump(audit_intake(root, a.intake_id))
+        elif a.cmd == "evidence-show": dump(read_evidence(root, a.evidence_id, corrected=not a.raw))
+        elif a.cmd == "evidence-correct":
+            new_text = Path(a.text_file).read_text(encoding="utf-8")
+            print(correct_evidence(root, a.evidence_id, new_text=new_text, reason=a.reason, verified_by=a.verified_by))
+        elif a.cmd == "evidence-bind":
+            print(bind_evidence(root, a.evidence_id, target_kind=a.target_kind, target_id=a.target_id, relation=a.relation, note=a.note))
+        elif a.cmd == "evidence-bindings": dump(list_bindings(root, evidence_id=a.evidence_id, target_id=a.target_id))
         elif a.cmd == "index": index_workspace(root); print("indexed")
         elif a.cmd == "change": print(create_change(root, a.title, a.owner)); index_workspace(root)
         elif a.cmd == "prepare": print(prepare_work(root, a.goal))
