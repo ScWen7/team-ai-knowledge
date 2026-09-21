@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from .core import ALLOWED_OUTCOMES, git_info, read_yaml, short_hash, utc_now, write_yaml
+from .core import ALLOWED_OUTCOMES, KIT_VERSION, git_info, read_yaml, short_hash, utc_now, write_yaml
 from .publication import (
     latest_publication_for,
     list_publications,
@@ -594,6 +594,7 @@ def prepare_project_work(
             "goal": goal,
             "state": "active",
             "created": utc_now(),
+            "kit_version": KIT_VERSION,
             "project_git": git_info(project_root),
             "knowledge_lock_sha256": lock_sha,
             "knowledge_lock": lock,
