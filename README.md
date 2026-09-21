@@ -116,3 +116,20 @@ V0.6 把多来源证据、显式依赖、正式发布和后续采用串成一条
 - adoption-status 查看最新发布版本被哪些 consumer 真正采用。
 
 详见 `docs/V0.6_SCOPE.md`。
+
+
+## V0.7
+
+V0.7 将团队知识 Publication 正式接入业务项目消费流程：
+
+- 项目显式声明 `knowledge_ids`；
+- `.knowledge/knowledge.lock.yml` 固定精确 Publication；
+- `notice / review-required / must-address` 转化为 start/release 门禁；
+- review-required 支持有理由 defer；
+- must-address 必须升级 lock，不能 defer；
+- Work 开始固定 lock SHA 和完整快照；
+- `project-context` 从 Git 历史 commit 精确读取锁定正文；
+- 任务中途 lock 改变时 finalize 拒绝，避免静默混用版本；
+- Project finalize 将实际 Publication adoption 回报 team-knowledge。
+
+详见 `docs/V0.7_SCOPE.md`。
