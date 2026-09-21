@@ -65,3 +65,19 @@ team-wiki prepare ./demo --goal "验证一项知识工作"
 - 确定性 GitHub Actions 回归。
 
 详见 `docs/V0.3_SCOPE.md`。
+
+
+## V0.4
+
+V0.4 引入 Evidence Layer：
+
+- 稳定 source identity 与 source revision 分离；
+- 来源逻辑路径与本地资料包路径分离；
+- processing.yml 记录 parser / version / effective config；
+- Evidence Chunk 保存 source revision、heading path、字符定位和 index state；
+- 人工纠正不覆盖 parser output；
+- Evidence 可以绑定 candidate / knowledge / change / review；
+- 来源更新影响分析同时使用 frontmatter source 引用和 evidence binding；
+- source-status 区分 acquisition / processing / evidence / indexing / knowledge-change。
+
+WeKnora 作为来源/证据处理的设计参考，不作为第三个必须运行的平台。详见 `docs/V0.4_SCOPE.md`。
