@@ -379,3 +379,60 @@ def audit_intake(root: Path, intake_id: str) -> dict[str, Any]:
         "summary": ledger.get("summary", {}),
         "processing": processing,
     }
+
+
+def source_pipeline_status(root: Path, source_id: str) -> dict[str, Any]:
+    meta_path = find_source_meta(root, source_id)
+    source = read_yaml(meta_path)
+    result: dict[str, Any] = {
+        "source_id": source_id,
+        "acquisition": {
+            "state": "acquired",
+            "content_sha256": source.get("content_sha256"),
+            "origin": source.get("origin"),
+        },
+        "processing": {"state": "not-started"},
+        "evidence": {"state": "not-ready", "count": 0},
+        "indexing": {"state": "not-configured", "counts": {}},
+        "knowledge_change": {
+            "state": "linked" if source.get("linked_changes") else "none",
+            "change_ids": source.get("linked_changes") or [],
+        },
+    }
+    intake_id = source.get("latest_intake_id")
+    if not intake_id:
+        return result
+    intake_root = root / ".knowledge/records/intake" / str(intake_id)
+    processing_path = intake_root / "processing.yml"
+    manifest_path = intake_root / "manifest.json"
+    ledger_path = intake_root / "review-progress.yml"
+    if processing_path.is_file():
+        processing = read_yaml(processing_path)
+        result["processing"] = {
+            "state": processing.get("state"),
+            "processing_id": processing.get("processing_id"),
+            "parser": processing.get("parser"),
+            "effective_config": processing.get("effective_config"),
+            "coverage": processing.get("coverage"),
+        }
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        chunks = manifest.get("chunks", [])
+        result["evidence"] = {
+            "state": "ready" if chunks else "not-ready",
+            "count": len(chunks),
+            "source_revision": manifest.get("source_revision"),
+        }
+        counts: dict[str, int] = {}
+        for row in chunks:
+            state = row.get("index_state", "unknown")
+            counts[state] = counts.get(state, 0) + 1
+        result["indexing"] = {
+            "state": "ready" if counts and all(k == "indexed" for k in counts) else "not-indexed",
+            "counts": counts,
+        }
+    if ledger_path.is_file():
+        ledger = read_yaml(ledger_path)
+        result["evidence"]["review_status"] = ledger.get("review_status")
+        result["evidence"]["review_summary"] = ledger.get("summary")
+    return result
