@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.4.0"
+KIT_VERSION = "0.5.0"
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
