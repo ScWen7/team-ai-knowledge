@@ -140,6 +140,7 @@ def init_project(
             {
                 "version": 1,
                 "project_id": project_id,
+                "source_repository_id": team_repository_id,
                 "updated_at": utc_now(),
                 "entries": {},
             },
@@ -189,6 +190,15 @@ def _publication_entry(publication: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _latest_effective_publication(
+    team_root: Path,
+    knowledge_id: str,
+) -> dict[str, Any] | None:
+    rows = list_publications(team_root, knowledge_id=knowledge_id)
+    effective = [row for row in rows if _effective(row)]
+    return effective[-1] if effective else None
+
+
 def lock_latest(
     project_root: Path,
     team_root: Path,
@@ -208,7 +218,7 @@ def lock_latest(
 
     missing: list[str] = []
     for kid in ids:
-        publication = latest_publication_for(team_root, kid)
+        publication = _latest_effective_publication(team_root, kid)
         if publication is None:
             missing.append(kid)
             continue
