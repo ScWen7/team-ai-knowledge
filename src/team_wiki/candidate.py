@@ -266,26 +266,44 @@ def create_patch_plan(
     return path
 
 
+def _stale_evidence(root: Path, plan: dict[str, Any]) -> list[dict[str, str]]:
+    stale: list[dict[str, str]] = []
+    for item in plan.get("evidence", []) or []:
+        current = read_evidence(root, item["evidence_id"], corrected=True)
+        expected = item.get("evidence_sha256")
+        actual = current["current_sha256"]
+        if expected != actual:
+            stale.append({
+                "evidence_id": item["evidence_id"],
+                "expected_sha256": str(expected),
+                "current_sha256": str(actual),
+            })
+    return stale
+
+
 def patch_plan_context(root: Path, plan_id: str) -> dict[str, Any]:
     plan = read_yaml(patch_plan_path(root, plan_id))
     ctx = candidate_context(root, plan["candidate_id"])
     target = plan["target"]
     target_content = None
-    stale = False
+    target_stale = False
     if plan["action"] == "update":
         path = root / target["path"]
         if path.exists():
             target_content = path.read_text(encoding="utf-8")
             current_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-            stale = current_sha != target.get("base_sha256")
+            target_stale = current_sha != target.get("base_sha256")
         else:
-            stale = True
+            target_stale = True
+    evidence_stale = _stale_evidence(root, plan)
     return {
         "plan": plan,
         "candidate": ctx["candidate"],
         "evidence": ctx["evidence"],
         "target_content": target_content,
-        "stale": stale,
+        "target_stale": target_stale,
+        "evidence_stale": evidence_stale,
+        "stale": target_stale or bool(evidence_stale),
         "instruction": (
             "Current Agent should draft the complete target Markdown using the evidence and plan. "
             "Do not claim publication; plan-apply only updates the contribution worktree."
@@ -301,6 +319,13 @@ def apply_patch_plan(root: Path, plan_id: str, content_file: Path) -> Path:
     if plan.get("status") == "applied":
         target = root / plan["target"]["path"]
         return target
+
+    stale_evidence = _stale_evidence(root, plan)
+    if stale_evidence:
+        raise ValueError(
+            "patch plan is stale: evidence changed since plan creation: "
+            + ", ".join(x["evidence_id"] for x in stale_evidence)
+        )
 
     target = _safe_wiki_target(root, plan["target"]["path"])
     proposed = content_file.read_text(encoding="utf-8")
