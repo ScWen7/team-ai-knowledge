@@ -129,11 +129,21 @@ def _list_paths(repo: Path, commit: str, include_paths: list[str]) -> list[str]:
     return [os.fsdecode(x) for x in raw.split(b"\0") if x]
 
 
+def _in_scope(path: str, include_paths: list[str]) -> bool:
+    if include_paths == ["."]:
+        return True
+    pure = PurePosixPath(path)
+    for base in include_paths:
+        prefix = PurePosixPath(base)
+        if pure == prefix or prefix in pure.parents:
+            return True
+    return False
+
+
 def _diff_events(repo: Path, old: str, new: str, include_paths: list[str]) -> list[dict[str, Any]]:
-    args = ["diff", "--name-status", "-M", "-z", old, new]
-    if include_paths != ["."]:
-        args += ["--", *include_paths]
-    raw = _git(repo, *args, text=False)
+    # Diff the whole tree first. Applying pathspecs before rename detection can
+    # turn "renamed out of monitored scope" into a false delete.
+    raw = _git(repo, "diff", "--name-status", "-M", "-z", old, new, text=False)
     assert isinstance(raw, bytes)
     fields = [os.fsdecode(x) for x in raw.split(b"\0") if x]
     out: list[dict[str, Any]] = []
@@ -147,12 +157,21 @@ def _diff_events(repo: Path, old: str, new: str, include_paths: list[str]) -> li
                 raise ValueError("unexpected git rename diff output")
             old_path, new_path = fields[i], fields[i + 1]
             i += 2
-            out.append({"kind": "rename", "status": status, "old_path": old_path, "path": new_path})
+            old_in = _in_scope(old_path, include_paths)
+            new_in = _in_scope(new_path, include_paths)
+            if old_in and new_in:
+                out.append({"kind": "rename", "status": status, "old_path": old_path, "path": new_path})
+            elif old_in and not new_in:
+                out.append({"kind": "scope-remove", "status": status, "old_path": old_path, "path": new_path})
+            elif not old_in and new_in:
+                out.append({"kind": "add", "status": status, "path": new_path, "from_path": old_path})
         else:
             if i >= len(fields):
                 raise ValueError("unexpected git diff output")
             path = fields[i]
             i += 1
+            if not _in_scope(path, include_paths):
+                continue
             mapping = {"A": "add", "M": "modify", "D": "delete", "T": "modify"}
             if kind in mapping:
                 out.append({"kind": mapping[kind], "status": status, "path": path})
@@ -386,7 +405,7 @@ def sync_git_connector(
     write_yaml(run_path, run)
 
     new_tracked = dict(tracked)
-    counts = {"add": 0, "modify": 0, "rename": 0, "delete": 0}
+    counts = {"add": 0, "modify": 0, "rename": 0, "delete": 0, "scope-remove": 0}
     try:
         for event in events:
             kind = event["kind"]
@@ -427,6 +446,28 @@ def sync_git_connector(
                     detail = {"kind": kind, "path": path, "source_id": source_id, "deletion": result}
                     retired[path] = source_id
                     new_tracked.pop(path, None)
+            elif kind == "scope-remove":
+                old_path = event["old_path"]
+                new_path = event["path"]
+                source_id = new_tracked.get(old_path)
+                if source_id is None:
+                    detail = {"kind": "scope-remove-untracked", "old_path": old_path, "path": new_path}
+                else:
+                    meta_path, meta = _source_meta(root, source_id)
+                    meta["status"] = "out-of-scope"
+                    meta["scope_removed_at"] = utc_now()
+                    meta["scope_removed_commit"] = head
+                    meta.setdefault("origin_history", []).append({
+                        "at": utc_now(),
+                        "event": "scope-remove",
+                        "from": old_path,
+                        "to": new_path,
+                        "commit": head,
+                    })
+                    write_yaml(meta_path, meta)
+                    retired[old_path] = source_id
+                    new_tracked.pop(old_path, None)
+                    detail = {"kind": kind, "old_path": old_path, "path": new_path, "source_id": source_id}
             else:
                 continue
             counts[kind] = counts.get(kind, 0) + 1
