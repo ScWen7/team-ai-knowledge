@@ -393,8 +393,11 @@ def project_gate(
 
         if state in {"current"}:
             continue
-        if state in {"scheduled", "scheduled-unlocked"}:
-            warnings.append({**item, "reason": "publication not effective yet"})
+        if state == "scheduled":
+            warnings.append({**item, "reason": "new Publication is not effective yet; locked version remains active"})
+            continue
+        if state == "scheduled-unlocked":
+            blockers.append({**item, "reason": "project has no locked Publication to use before the scheduled version becomes effective"})
             continue
         if state in {"unlocked", "no-publication"}:
             blockers.append({**item, "reason": "project has no usable locked Publication"})
