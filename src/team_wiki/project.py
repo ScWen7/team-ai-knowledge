@@ -287,45 +287,61 @@ def project_status(project_root: Path, team_root: Path) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
 
     for kid in source.get("knowledge_ids") or []:
-        latest = latest_publication_for(team_root, kid)
+        all_publications = list_publications(team_root, knowledge_id=kid)
+        latest_published = all_publications[-1] if all_publications else None
+        effective_publications = [row for row in all_publications if _effective(row)]
+        latest_effective = effective_publications[-1] if effective_publications else None
+        scheduled = (
+            latest_published
+            if latest_published
+            and (
+                latest_effective is None
+                or latest_published.get("publication_id")
+                != latest_effective.get("publication_id")
+            )
+            and not _effective(latest_published)
+            else None
+        )
         locked = entries.get(kid)
 
-        if latest is None:
-            rows.append(
-                {
-                    "knowledge_id": kid,
-                    "state": "no-publication",
-                    "locked": locked,
-                    "latest": None,
-                    "effective": True,
-                    "decision": None,
-                }
-            )
-            continue
-
-        is_effective = _effective(latest)
-        if locked is None:
-            state = "unlocked" if is_effective else "scheduled-unlocked"
+        if latest_effective is None:
+            state = "scheduled-unlocked" if scheduled else "no-publication"
             rows.append(
                 {
                     "knowledge_id": kid,
                     "state": state,
-                    "locked": None,
-                    "latest": latest,
-                    "effective": is_effective,
+                    "locked": locked,
+                    "latest": None,
+                    "latest_effective": None,
+                    "scheduled": scheduled,
                     "decision": None,
                 }
             )
             continue
 
-        if locked.get("publication_id") == latest.get("publication_id"):
+        if locked is None:
             rows.append(
                 {
                     "knowledge_id": kid,
-                    "state": "current",
+                    "state": "unlocked",
+                    "locked": None,
+                    "latest": latest_effective,
+                    "latest_effective": latest_effective,
+                    "scheduled": scheduled,
+                    "decision": None,
+                }
+            )
+            continue
+
+        if locked.get("publication_id") == latest_effective.get("publication_id"):
+            rows.append(
+                {
+                    "knowledge_id": kid,
+                    "state": "scheduled" if scheduled else "current",
                     "locked": locked,
-                    "latest": latest,
-                    "effective": is_effective,
+                    "latest": latest_effective,
+                    "latest_effective": latest_effective,
+                    "scheduled": scheduled,
                     "decision": None,
                 }
             )
@@ -335,22 +351,21 @@ def project_status(project_root: Path, team_root: Path) -> dict[str, Any]:
             project_root,
             kid,
             locked.get("publication_id"),
-            str(latest["publication_id"]),
+            str(latest_effective["publication_id"]),
         )
-        if not is_effective:
-            state = "scheduled"
-        elif decision and decision.get("decision") == "defer":
-            state = "deferred"
-        else:
-            state = "update-available"
-
+        state = (
+            "deferred"
+            if decision and decision.get("decision") == "defer"
+            else "update-available"
+        )
         rows.append(
             {
                 "knowledge_id": kid,
                 "state": state,
                 "locked": locked,
-                "latest": latest,
-                "effective": is_effective,
+                "latest": latest_effective,
+                "latest_effective": latest_effective,
+                "scheduled": scheduled,
                 "decision": decision,
             }
         )
@@ -379,10 +394,15 @@ def project_gate(
     for row in status["rows"]:
         state = row["state"]
         latest = row.get("latest")
+        scheduled = row.get("scheduled")
         requirement = (
             latest.get("adoption_requirement")
             if isinstance(latest, dict)
-            else None
+            else (
+                scheduled.get("adoption_requirement")
+                if isinstance(scheduled, dict)
+                else None
+            )
         )
 
         item = {
@@ -399,12 +419,26 @@ def project_gate(
                 if isinstance(latest, dict)
                 else None
             ),
+            "scheduled_publication_id": (
+                scheduled.get("publication_id")
+                if isinstance(scheduled, dict)
+                else None
+            ),
         }
 
         if state in {"current"}:
             continue
         if state == "scheduled":
-            warnings.append({**item, "reason": "new Publication is not effective yet; locked version remains active"})
+            scheduled_requirement = (
+                scheduled.get("adoption_requirement")
+                if isinstance(scheduled, dict)
+                else None
+            )
+            warnings.append({
+                **item,
+                "requirement": scheduled_requirement,
+                "reason": "new Publication is not effective yet; locked effective version remains active",
+            })
             continue
         if state == "scheduled-unlocked":
             blockers.append({**item, "reason": "project has no locked Publication to use before the scheduled version becomes effective"})
@@ -475,18 +509,15 @@ def handle_update(
     lock = read_yaml(lock_path)
     entries = dict(lock.get("entries") or {})
     locked = entries.get(knowledge_id)
-    latest = latest_publication_for(team_root, knowledge_id)
+    latest = _latest_effective_publication(team_root, knowledge_id)
     if latest is None:
-        raise ValueError(f"no Publication exists for: {knowledge_id}")
+        raise ValueError(f"no effective Publication exists for: {knowledge_id}")
     if locked and locked.get("publication_id") == latest.get("publication_id"):
         return {
             "knowledge_id": knowledge_id,
             "decision": "already-current",
             "publication_id": latest["publication_id"],
         }
-    if not _effective(latest):
-        raise ValueError("latest Publication is not effective yet")
-
     requirement = str(latest.get("adoption_requirement"))
     from_pub = locked.get("publication_id") if locked else None
     to_pub = str(latest["publication_id"])
