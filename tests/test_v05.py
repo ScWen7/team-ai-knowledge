@@ -18,7 +18,7 @@ from team_wiki.connector import (
     sync_git_connector,
 )
 from team_wiki.core import init_team, parse_frontmatter, register_source
-from team_wiki.evidence import bind_evidence
+from team_wiki.evidence import bind_evidence, correct_evidence
 from team_wiki.intake import intake_source
 
 
@@ -176,6 +176,66 @@ evidence: []
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "stale"):
+                apply_patch_plan(root, plan_id, proposed)
+
+    def test_patch_plan_rejects_changed_evidence(self):
+        with TemporaryDirectory() as td:
+            root = Path(td) / "kb"
+            init_team(root, "demo-team")
+            self._knowledge(root)
+            evidence_id = self._evidence(root)
+            candidate = create_candidate(
+                root,
+                proposed_id="K-ORDER",
+                title="证据变化测试",
+                knowledge_type="rule",
+                statement="基于当前证据提出修改。",
+            )
+            candidate_id = yaml.safe_load(candidate.read_text(encoding="utf-8"))["candidate_id"]
+            bind_evidence(root, evidence_id, target_kind="candidate", target_id=candidate_id, relation="supports")
+            plan = create_patch_plan(
+                root,
+                candidate_id,
+                comparison="adds",
+                summary="补充说明。",
+                target_knowledge_id="K-ORDER",
+            )
+            plan_id = yaml.safe_load(plan.read_text(encoding="utf-8"))["plan_id"]
+
+            current = patch_plan_context(root, plan_id)
+            self.assertFalse(current["stale"])
+            evidence_text = current["evidence"][0]["text"]
+            correct_evidence(
+                root,
+                evidence_id,
+                new_text=evidence_text + "\n经复核增加一个限定条件。",
+                reason="新增人工核对结果",
+                verified_by="demo-owner",
+            )
+            stale = patch_plan_context(root, plan_id)
+            self.assertTrue(stale["stale"])
+            self.assertEqual(stale["evidence_stale"][0]["evidence_id"], evidence_id)
+
+            proposed = Path(td) / "proposal.md"
+            proposed.write_text(
+                """---
+id: K-ORDER
+type: rule
+status: draft
+title: 证据变化测试
+owner: demo
+confidence: unknown
+summary: 示例
+tags: []
+related: []
+evidence: []
+---
+# 证据变化测试
+内容
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "evidence changed"):
                 apply_patch_plan(root, plan_id, proposed)
 
     def _git(self, repo: Path, *args: str) -> str:
