@@ -150,6 +150,12 @@ def create_patch_plan(
     if comparison == "new":
         if target_knowledge_id and target_knowledge_id != proposed_id:
             raise ValueError("new knowledge target id must match candidate proposed_id")
+        try:
+            existing_path, _existing_meta, _existing_digest = knowledge_ref(root, proposed_id)
+        except KeyError:
+            existing_path = None
+        if existing_path is not None:
+            raise ValueError(f"knowledge id already exists: {proposed_id} at {existing_path.relative_to(root)}")
         if not target_path:
             raise ValueError("new knowledge requires target_path")
         path = _safe_wiki_target(root, target_path)
