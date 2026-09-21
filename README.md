@@ -101,3 +101,18 @@ V0.5 打通两条链路：
 - 没有知识依赖的来源更新不自动制造 CHG/Review。
 
 详见 `docs/V0.5_SCOPE.md`。
+
+
+## V0.6
+
+V0.6 把多来源证据、显式依赖、正式发布和后续采用串成一条完整链：
+
+- Candidate Batch：多份来源/候选显式归并为 merged Candidate；
+- dependency-impact：仅沿 depends_on 传播强影响；
+- Patch Apply 自动建立 dependency Review；
+- publish：要求 Review 已处理且真实 Git commit 中的正文 hash 匹配；
+- prepare/adopt 自动绑定最新 Publication；
+- finalize 生成共享 Adoption Record；
+- adoption-status 查看最新发布版本被哪些 consumer 真正采用。
+
+详见 `docs/V0.6_SCOPE.md`。

@@ -19,6 +19,9 @@ from .core import (
 )
 from .impact import refresh_source
 from .candidate import apply_patch_plan, candidate_context, create_candidate, create_patch_plan, patch_plan_context
+from .batch import batch_context, create_candidate_batch
+from .dependency import dependency_impact
+from .publication import adoption_status, list_publications, record_publication
 from .connector import connector_status, create_git_connector, sync_git_connector
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
 from .intake import apply_disposition, audit_intake, intake_source, intake_status, source_pipeline_status
@@ -53,6 +56,12 @@ def main():
     x = sub.add_parser("patch-plan"); x.add_argument("root"); x.add_argument("candidate_id"); x.add_argument("--comparison", required=True); x.add_argument("--summary", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--target-id"); x.add_argument("--target-path")
     x = sub.add_parser("patch-context"); x.add_argument("root"); x.add_argument("plan_id")
     x = sub.add_parser("patch-apply"); x.add_argument("root"); x.add_argument("plan_id"); x.add_argument("content_file")
+    x = sub.add_parser("batch-create"); x.add_argument("root"); x.add_argument("candidate_ids", nargs="+"); x.add_argument("--title", required=True); x.add_argument("--statement", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--scope", default="team")
+    x = sub.add_parser("batch-show"); x.add_argument("root"); x.add_argument("batch_id")
+    x = sub.add_parser("dependency-impact"); x.add_argument("root"); x.add_argument("knowledge_id"); x.add_argument("--direct-only", action="store_true")
+    x = sub.add_parser("publish"); x.add_argument("root"); x.add_argument("change_id"); x.add_argument("knowledge_id"); x.add_argument("--ref", default="HEAD"); x.add_argument("--requirement", default="notice"); x.add_argument("--effective-at")
+    x = sub.add_parser("publication-list"); x.add_argument("root"); x.add_argument("--knowledge-id")
+    x = sub.add_parser("adoption-status"); x.add_argument("root"); x.add_argument("knowledge_id")
 
     x = sub.add_parser("connector-add-git"); x.add_argument("root"); x.add_argument("connector_id"); x.add_argument("--repository-id", required=True); x.add_argument("--include", action="append", default=[]); x.add_argument("--logical-root"); x.add_argument("--auto-intake", action="store_true")
     x = sub.add_parser("connector-status"); x.add_argument("root"); x.add_argument("connector_id")
@@ -60,7 +69,7 @@ def main():
 
     x = sub.add_parser("index"); x.add_argument("root")
     x = sub.add_parser("change"); x.add_argument("root"); x.add_argument("title"); x.add_argument("--owner", default="unassigned")
-    x = sub.add_parser("prepare"); x.add_argument("root"); x.add_argument("--goal", required=True)
+    x = sub.add_parser("prepare"); x.add_argument("root"); x.add_argument("--goal", required=True); x.add_argument("--consumer")
     x = sub.add_parser("search"); x.add_argument("root"); x.add_argument("query")
     x = sub.add_parser("related"); x.add_argument("root"); x.add_argument("knowledge_id"); x.add_argument("--limit", type=int, default=5)
     x = sub.add_parser("context"); x.add_argument("root"); x.add_argument("query"); x.add_argument("--max-context", type=int); x.add_argument("--limit", type=int, default=5)
@@ -108,13 +117,21 @@ def main():
             print(create_patch_plan(root, a.candidate_id, comparison=a.comparison, summary=a.summary, owner=a.owner, target_knowledge_id=a.target_id, target_path=a.target_path))
         elif a.cmd == "patch-context": dump(patch_plan_context(root, a.plan_id))
         elif a.cmd == "patch-apply": print(apply_patch_plan(root, a.plan_id, Path(a.content_file).resolve()))
+        elif a.cmd == "batch-create":
+            print(create_candidate_batch(root, a.candidate_ids, title=a.title, merged_statement=a.statement, owner=a.owner, scope=a.scope))
+        elif a.cmd == "batch-show": dump(batch_context(root, a.batch_id))
+        elif a.cmd == "dependency-impact": dump(dependency_impact(root, a.knowledge_id, transitive=not a.direct_only))
+        elif a.cmd == "publish":
+            print(record_publication(root, a.change_id, a.knowledge_id, published_ref=a.ref, adoption_requirement=a.requirement, effective_at=a.effective_at))
+        elif a.cmd == "publication-list": dump(list_publications(root, knowledge_id=a.knowledge_id))
+        elif a.cmd == "adoption-status": dump(adoption_status(root, a.knowledge_id))
         elif a.cmd == "connector-add-git":
             print(create_git_connector(root, a.connector_id, repository_id=a.repository_id, include_paths=a.include or ["."], logical_root=a.logical_root, auto_intake=a.auto_intake))
         elif a.cmd == "connector-status": dump(connector_status(root, a.connector_id))
         elif a.cmd == "connector-sync": dump(sync_git_connector(root, a.connector_id, Path(a.repo_path).resolve(), owner=a.owner))
         elif a.cmd == "index": index_workspace(root); print("indexed")
         elif a.cmd == "change": print(create_change(root, a.title, a.owner)); index_workspace(root)
-        elif a.cmd == "prepare": print(prepare_work(root, a.goal))
+        elif a.cmd == "prepare": print(prepare_work(root, a.goal, consumer_id=a.consumer))
         elif a.cmd == "search": dump(search(root, a.query))
         elif a.cmd == "related": dump(related(root, a.knowledge_id, a.limit))
         elif a.cmd == "context": dump(context_plan(root, a.query, a.max_context, a.limit))

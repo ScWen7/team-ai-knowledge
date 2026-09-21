@@ -757,3 +757,157 @@ Git / manual source
 ```
 
 下一阶段重点不再是增加对象，而是处理多来源聚合、Overview/Analysis 依赖影响、发布记录和后续采用验证。
+
+
+---
+
+## 23. 多来源归并、依赖影响与发布采用闭环
+
+V0.6 将 V0.5 的单一 Candidate/Patch Plan 扩展成完整的团队复用链：
+
+```text
+多来源 Evidence
+  → 多 Candidate
+  → Batch + merged Candidate
+  → Patch Plan
+  → Wiki 修改
+  → 显式依赖影响
+  → Review
+  → Git 发布
+  → Publication
+  → 后续 Work adoption
+  → Adoption Record
+```
+
+### 23.1 Batch 是工作产物，不是新的正式知识层
+
+Candidate Batch 只用于把同一 proposed knowledge 的多个 Candidate 放到一起处理。它不会自动决定结论，merged statement 仍由当前 Agent/领域责任人明确。
+
+程序负责：
+
+- 候选兼容性；
+- Evidence 去重；
+- Evidence relation 保留；
+- relation 冲突提示；
+- merged Candidate 建立。
+
+最终仍然进入既有 Patch Plan / CHG，不形成第二套发布流程。
+
+### 23.2 强影响只沿显式 depends_on 传播
+
+知识关系分两类：
+
+- related / graph relevance：帮助检索和调查；
+- depends_on：表示上游知识变化后需要复核。
+
+V0.6 的 impact 只认 `depends_on` 和 `references.relation=depends_on`。
+
+因此，修改 K-A 时：
+
+```text
+K-B depends_on K-A
+Overview depends_on K-B
+```
+
+会形成：
+
+```text
+K-A changed
+ → K-B direct review
+ → Overview transitive review
+```
+
+但普通 related 页面不会被自动列入强制复核。
+
+### 23.3 Patch Apply 后立即产生依赖 Review
+
+Patch Plan 应用完成后：
+
+1. 计算显式 dependency impact；
+2. 如存在 dependents，创建/复用 dependency Review；
+3. 将 Review 关联原 CHG；
+4. 保存 impact 到 Patch Plan 与 CHG；
+5. Publication 必须等待 Review 被 resolved/dismissed。
+
+这保证“正文已经改了”不会绕过依赖知识的复核。
+
+### 23.4 Publication 必须绑定真实 Git commit
+
+知识的 active/status 字段不能宣布自己已发布。
+
+正式 Publication 需要核验：
+
+```text
+CHG proposed/ready
+ + no unresolved Reviews
+ + real Git commit
+ + commit 中目标 Markdown hash == 当前正文 hash
+```
+
+然后才产生 PUB 记录。
+
+Publication 记录 adoption requirement，但不自动 push/merge Git，也不替代仓库保护规则。
+
+### 23.5 Work adoption 绑定已发布版本
+
+Work adopted 某条知识时，只有当前正文和最新 Publication 的 content hash 一致，才记录：
+
+- publication_id；
+- published_ref；
+- adoption_requirement；
+- publication_match=true。
+
+若成员处在包含未发布知识修改的工作树中：
+
+```text
+latest Publication hash != current file hash
+```
+
+则该使用不会被计为对正式发布版本的 adoption。
+
+### 23.6 Adoption Record 是共享的复用证据
+
+Work 本身可以继续是本地运行记录，但其中“某个 consumer 实际采用哪个 Publication，以及结果如何”具有团队复用价值。
+
+因此 finalize 将这部分提炼为共享 Adoption Record：
+
+```text
+consumer
+ + publication
+ + used_for
+ + outcome
+ + evidence
+```
+
+这样可以回答：
+
+- 新知识发布后哪些项目实际采用过；
+- 哪些采用只是使用，哪些有 supported/boundary/contradicted 结果；
+- 一个发布是否已经跨项目得到复用验证。
+
+发布次数不再被误当成复用次数。
+
+### 23.7 当前闭环
+
+至 V0.6，完整链路为：
+
+```text
+Source
+ → Revision
+ → Processing
+ → Evidence
+ → Candidate
+ → Batch
+ → Patch Plan
+ → CHG / Review
+ → Wiki modification
+ → Dependency Review
+ → Git commit
+ → Publication
+ → Work adoption
+ → Outcome
+ → Adoption Record
+ → new Evidence / next CHG
+```
+
+下一阶段重点从“把链路接起来”转向“提高多人、多项目下的治理质量”：依赖 Review 修订、项目 adoption requirement 门禁、知识锁版本以及冲突批次处理。

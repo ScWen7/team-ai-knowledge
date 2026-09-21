@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.5.0"
+KIT_VERSION = "0.6.0"
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
@@ -404,16 +404,19 @@ def create_change(root: Path, title: str, owner: str = "unassigned") -> Path:
     return path
 
 
-def prepare_work(root: Path, goal: str) -> Path:
+def prepare_work(root: Path, goal: str, consumer_id: str | None = None) -> Path:
     runs = root / ".knowledge/runs"
     runs.mkdir(parents=True, exist_ok=True)
-    wid = f"W-{short_hash((goal + '|' + utc_now()).encode())}"
+    config = read_yaml(root / ".knowledge/config.yml")
+    consumer = consumer_id or config.get("repository_id") or "unknown"
+    wid = f"W-{short_hash((goal + '|' + str(consumer) + '|' + utc_now()).encode())}"
     path = runs / f"{wid}.yml"
     write_yaml(
         path,
         {
             "work_id": wid,
             "goal": goal,
+            "consumer_id": consumer,
             "state": "active",
             "created": utc_now(),
             "kit_version": KIT_VERSION,
@@ -662,9 +665,16 @@ def _work_path(root: Path, work_id: str) -> Path:
 
 
 def adopt_knowledge(root: Path, work_id: str, knowledge_id: str, used_for: str) -> dict[str, Any]:
+    from .publication import latest_publication_for
+
     path = _work_path(root, work_id)
     work = read_yaml(path)
     kpath, meta, digest = knowledge_ref(root, knowledge_id)
+    publication = latest_publication_for(root, knowledge_id)
+    publication_matches = bool(
+        publication and publication.get("content_sha256") == digest
+    )
+
     adopted = work.setdefault("adopted", [])
     entry = next((x for x in adopted if x.get("knowledge_id") == knowledge_id), None)
     if entry is None:
@@ -678,6 +688,11 @@ def adopt_knowledge(root: Path, work_id: str, knowledge_id: str, used_for: str) 
             "outcome": "not-verified",
             "evidence_ids": [],
             "observations": [],
+            "publication_id": publication.get("publication_id") if publication_matches else None,
+            "published_ref": publication.get("published_ref") if publication_matches else None,
+            "adoption_requirement": publication.get("adoption_requirement") if publication_matches else None,
+            "latest_publication_id": publication.get("publication_id") if publication else None,
+            "publication_match": publication_matches,
         }
         adopted.append(entry)
     else:
@@ -762,5 +777,14 @@ def finalize_work(root: Path, work_id: str, owner: str = "unassigned") -> dict[s
     work["finalized"] = utc_now()
     work["changes"] = list(dict.fromkeys([*(work.get("changes") or []), *created]))
     write_yaml(path, work)
+
+    from .publication import record_work_adoptions
+    adoption_paths = record_work_adoptions(root, work)
+
     index_workspace(root)
-    return {"work_id": work_id, "changes": created, "state": work["state"]}
+    return {
+        "work_id": work_id,
+        "changes": created,
+        "adoption_ids": [p.stem for p in adoption_paths],
+        "state": work["state"],
+    }
