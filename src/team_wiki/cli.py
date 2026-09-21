@@ -22,6 +22,18 @@ from .candidate import apply_patch_plan, candidate_context, create_candidate, cr
 from .batch import batch_context, create_candidate_batch
 from .dependency import dependency_impact
 from .publication import adoption_status, list_publications, record_publication
+from .project import (
+    finalize_project_work,
+    handle_update,
+    init_project,
+    lock_latest,
+    prepare_project_work,
+    project_adopt,
+    project_context,
+    project_gate,
+    project_observe,
+    project_status,
+)
 from .connector import connector_status, create_git_connector, sync_git_connector
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
 from .intake import apply_disposition, audit_intake, intake_source, intake_status, source_pipeline_status
@@ -62,6 +74,18 @@ def main():
     x = sub.add_parser("publish"); x.add_argument("root"); x.add_argument("change_id"); x.add_argument("knowledge_id"); x.add_argument("--ref", default="HEAD"); x.add_argument("--requirement", default="notice"); x.add_argument("--effective-at")
     x = sub.add_parser("publication-list"); x.add_argument("root"); x.add_argument("--knowledge-id")
     x = sub.add_parser("adoption-status"); x.add_argument("root"); x.add_argument("knowledge_id")
+
+
+    x = sub.add_parser("project-init"); x.add_argument("root"); x.add_argument("--project-id", required=True); x.add_argument("--team-repository-id", required=True); x.add_argument("--knowledge-id", action="append", required=True)
+    x = sub.add_parser("project-lock"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--knowledge-id", action="append")
+    x = sub.add_parser("project-status"); x.add_argument("root"); x.add_argument("team_root")
+    x = sub.add_parser("project-update"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("knowledge_id"); x.add_argument("--decision", required=True, choices=["accept", "defer"]); x.add_argument("--reason", default="")
+    x = sub.add_parser("project-gate"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--phase", required=True, choices=["start", "release"])
+    x = sub.add_parser("project-prepare"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--goal", required=True)
+    x = sub.add_parser("project-context"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("work_id"); x.add_argument("knowledge_id")
+    x = sub.add_parser("project-adopt"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("knowledge_id"); x.add_argument("--used-for", required=True)
+    x = sub.add_parser("project-observe"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("knowledge_id"); x.add_argument("--outcome", required=True); x.add_argument("--note", required=True); x.add_argument("--evidence", action="append", default=[])
+    x = sub.add_parser("project-finalize"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("work_id")
 
     x = sub.add_parser("connector-add-git"); x.add_argument("root"); x.add_argument("connector_id"); x.add_argument("--repository-id", required=True); x.add_argument("--include", action="append", default=[]); x.add_argument("--logical-root"); x.add_argument("--auto-intake", action="store_true")
     x = sub.add_parser("connector-status"); x.add_argument("root"); x.add_argument("connector_id")
@@ -125,6 +149,27 @@ def main():
             print(record_publication(root, a.change_id, a.knowledge_id, published_ref=a.ref, adoption_requirement=a.requirement, effective_at=a.effective_at))
         elif a.cmd == "publication-list": dump(list_publications(root, knowledge_id=a.knowledge_id))
         elif a.cmd == "adoption-status": dump(adoption_status(root, a.knowledge_id))
+        elif a.cmd == "project-init":
+            init_project(root, project_id=a.project_id, team_repository_id=a.team_repository_id, knowledge_ids=a.knowledge_id)
+            print(root)
+        elif a.cmd == "project-lock":
+            print(lock_latest(root, Path(a.team_root).resolve(), knowledge_ids=a.knowledge_id))
+        elif a.cmd == "project-status":
+            dump(project_status(root, Path(a.team_root).resolve()))
+        elif a.cmd == "project-update":
+            dump(handle_update(root, Path(a.team_root).resolve(), a.knowledge_id, decision=a.decision, reason=a.reason))
+        elif a.cmd == "project-gate":
+            result = project_gate(root, Path(a.team_root).resolve(), phase=a.phase); dump(result); raise SystemExit(0 if result["ok"] else 1)
+        elif a.cmd == "project-prepare":
+            print(prepare_project_work(root, Path(a.team_root).resolve(), goal=a.goal))
+        elif a.cmd == "project-context":
+            dump(project_context(root, Path(a.team_root).resolve(), a.work_id, a.knowledge_id))
+        elif a.cmd == "project-adopt":
+            dump(project_adopt(root, a.work_id, a.knowledge_id, used_for=a.used_for))
+        elif a.cmd == "project-observe":
+            dump(project_observe(root, a.work_id, a.knowledge_id, outcome=a.outcome, note=a.note, evidence_ids=a.evidence))
+        elif a.cmd == "project-finalize":
+            dump(finalize_project_work(root, Path(a.team_root).resolve(), a.work_id))
         elif a.cmd == "connector-add-git":
             print(create_git_connector(root, a.connector_id, repository_id=a.repository_id, include_paths=a.include or ["."], logical_root=a.logical_root, auto_intake=a.auto_intake))
         elif a.cmd == "connector-status": dump(connector_status(root, a.connector_id))
