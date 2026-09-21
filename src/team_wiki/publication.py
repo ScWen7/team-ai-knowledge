@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,10 @@ from .review import find_review
 
 ADOPTION_REQUIREMENTS = {"notice", "review-required", "must-address"}
 RESOLVED_REVIEW_STATES = {"resolved", "dismissed"}
+
+
+def _publication_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _records(root: Path, kind: str) -> Path:
@@ -127,6 +132,7 @@ def record_publication(
             "current knowledge content is not identical to the requested published Git commit"
         )
 
+    published_at = _publication_now()
     key = f"{knowledge_id}|{commit}|{current_sha}|{change_id}"
     publication_id = "PUB-" + hashlib.sha256(key.encode()).hexdigest()[:12].upper()
     out = _records(root, "publications") / f"{publication_id}.yml"
@@ -141,7 +147,7 @@ def record_publication(
                 "path": rel,
                 "content_sha256": current_sha,
                 "adoption_requirement": adoption_requirement,
-                "published_at": utc_now(),
+                "published_at": published_at,
                 "effective_at": effective_at,
             },
         )
@@ -156,7 +162,7 @@ def record_publication(
                 "published_ref": commit,
                 "content_sha256": current_sha,
                 "adoption_requirement": adoption_requirement,
-                "published_at": utc_now(),
+                "published_at": published_at,
                 "effective_at": effective_at,
             },
         },
