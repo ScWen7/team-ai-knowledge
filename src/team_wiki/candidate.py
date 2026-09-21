@@ -26,6 +26,7 @@ from .core import (
 )
 from .evidence import list_bindings, read_evidence
 from .review import upsert_review
+from .dependency import open_dependency_review
 
 
 COMPARISONS = {"new", "adds", "narrows", "contradicts", "duplicates"}
@@ -356,7 +357,18 @@ def apply_patch_plan(root: Path, plan_id: str, content_file: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(proposed, encoding="utf-8")
     applied_sha = hashlib.sha256(target.read_bytes()).hexdigest()
+
+    dependency_review_id, dependency_impact = open_dependency_review(
+        root,
+        expected_id,
+        content_sha256=applied_sha,
+        change_id=plan.get("change_id"),
+        owner=str(plan.get("owner") or "unassigned"),
+    )
+
     plan["status"] = "applied"
+    plan["dependency_impact"] = dependency_impact
+    plan["dependency_review_id"] = dependency_review_id
     plan["applied"] = {
         "at": utc_now(),
         "path": str(target.relative_to(root)),
@@ -375,9 +387,15 @@ def apply_patch_plan(root: Path, plan_id: str, content_file: Path) -> Path:
             None,
         )
         if change_path:
+            current_meta, _ = parse_frontmatter(change_path)
+            review_ids = list(current_meta.get("review_ids") or [])
+            if dependency_review_id:
+                review_ids = list(dict.fromkeys([*review_ids, dependency_review_id]))
             _rewrite_change_meta(change_path, {
                 "stage": "proposed",
                 "patch_plan_ids": [plan_id],
+                "review_ids": review_ids,
+                "dependency_impact": dependency_impact,
             })
     index_workspace(root)
     return target
