@@ -18,6 +18,8 @@ from .core import (
     search,
 )
 from .impact import refresh_source
+from .candidate import apply_patch_plan, candidate_context, create_candidate, create_patch_plan, patch_plan_context
+from .connector import connector_status, create_git_connector, sync_git_connector
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
 from .intake import apply_disposition, audit_intake, intake_source, intake_status, source_pipeline_status
 from .node_core import context_budget
@@ -46,6 +48,15 @@ def main():
     x = sub.add_parser("evidence-correct"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--text-file", required=True); x.add_argument("--reason", required=True); x.add_argument("--verified-by", required=True)
     x = sub.add_parser("evidence-bind"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--target-kind", required=True); x.add_argument("--target-id", required=True); x.add_argument("--relation", required=True); x.add_argument("--note", default="")
     x = sub.add_parser("evidence-bindings"); x.add_argument("root"); x.add_argument("--evidence-id"); x.add_argument("--target-id")
+    x = sub.add_parser("candidate-create"); x.add_argument("root"); x.add_argument("--proposed-id", required=True); x.add_argument("--title", required=True); x.add_argument("--type", required=True); x.add_argument("--statement", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--scope", default="team")
+    x = sub.add_parser("candidate-show"); x.add_argument("root"); x.add_argument("candidate_id")
+    x = sub.add_parser("patch-plan"); x.add_argument("root"); x.add_argument("candidate_id"); x.add_argument("--comparison", required=True); x.add_argument("--summary", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--target-id"); x.add_argument("--target-path")
+    x = sub.add_parser("patch-context"); x.add_argument("root"); x.add_argument("plan_id")
+    x = sub.add_parser("patch-apply"); x.add_argument("root"); x.add_argument("plan_id"); x.add_argument("content_file")
+
+    x = sub.add_parser("connector-add-git"); x.add_argument("root"); x.add_argument("connector_id"); x.add_argument("--repository-id", required=True); x.add_argument("--include", action="append", default=[]); x.add_argument("--logical-root"); x.add_argument("--auto-intake", action="store_true")
+    x = sub.add_parser("connector-status"); x.add_argument("root"); x.add_argument("connector_id")
+    x = sub.add_parser("connector-sync"); x.add_argument("root"); x.add_argument("connector_id"); x.add_argument("repo_path"); x.add_argument("--owner", default="unassigned")
 
     x = sub.add_parser("index"); x.add_argument("root")
     x = sub.add_parser("change"); x.add_argument("root"); x.add_argument("title"); x.add_argument("--owner", default="unassigned")
@@ -90,6 +101,17 @@ def main():
         elif a.cmd == "evidence-bind":
             print(bind_evidence(root, a.evidence_id, target_kind=a.target_kind, target_id=a.target_id, relation=a.relation, note=a.note))
         elif a.cmd == "evidence-bindings": dump(list_bindings(root, evidence_id=a.evidence_id, target_id=a.target_id))
+        elif a.cmd == "candidate-create":
+            print(create_candidate(root, proposed_id=a.proposed_id, title=a.title, knowledge_type=a.type, statement=a.statement, owner=a.owner, scope=a.scope))
+        elif a.cmd == "candidate-show": dump(candidate_context(root, a.candidate_id))
+        elif a.cmd == "patch-plan":
+            print(create_patch_plan(root, a.candidate_id, comparison=a.comparison, summary=a.summary, owner=a.owner, target_knowledge_id=a.target_id, target_path=a.target_path))
+        elif a.cmd == "patch-context": dump(patch_plan_context(root, a.plan_id))
+        elif a.cmd == "patch-apply": print(apply_patch_plan(root, a.plan_id, Path(a.content_file).resolve()))
+        elif a.cmd == "connector-add-git":
+            print(create_git_connector(root, a.connector_id, repository_id=a.repository_id, include_paths=a.include or ["."], logical_root=a.logical_root, auto_intake=a.auto_intake))
+        elif a.cmd == "connector-status": dump(connector_status(root, a.connector_id))
+        elif a.cmd == "connector-sync": dump(sync_git_connector(root, a.connector_id, Path(a.repo_path).resolve(), owner=a.owner))
         elif a.cmd == "index": index_workspace(root); print("indexed")
         elif a.cmd == "change": print(create_change(root, a.title, a.owner)); index_workspace(root)
         elif a.cmd == "prepare": print(prepare_work(root, a.goal))
