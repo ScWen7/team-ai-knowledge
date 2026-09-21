@@ -11,6 +11,7 @@ import hashlib
 import os
 import subprocess
 import tempfile
+import shutil
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -177,12 +178,16 @@ def _source_meta(root: Path, source_id: str) -> tuple[Path, dict[str, Any]]:
     return meta, read_yaml(meta)
 
 
-def _write_temp_blob(data: bytes, suffix: str) -> Path:
-    fd, name = tempfile.mkstemp(prefix="team-wiki-git-", suffix=suffix)
-    os.close(fd)
-    path = Path(name)
+def _write_temp_blob(data: bytes, upstream_path: str) -> Path:
+    directory = Path(tempfile.mkdtemp(prefix="team-wiki-git-"))
+    name = Path(upstream_path).name or "source"
+    path = directory / name
     path.write_bytes(data)
     return path
+
+
+def _cleanup_temp_blob(path: Path) -> None:
+    shutil.rmtree(path.parent, ignore_errors=True)
 
 
 def _initial_add(
@@ -193,7 +198,7 @@ def _initial_add(
     path: str,
 ) -> str:
     data = _blob(repo, commit, path)
-    temp = _write_temp_blob(data, Path(path).suffix)
+    temp = _write_temp_blob(data, path)
     try:
         pkg = register_source(
             root,
@@ -209,7 +214,7 @@ def _initial_add(
             intake_source(root, source_id)
         return source_id
     finally:
-        temp.unlink(missing_ok=True)
+        _cleanup_temp_blob(temp)
 
 
 def _refresh(
