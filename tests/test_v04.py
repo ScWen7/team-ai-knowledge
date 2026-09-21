@@ -8,7 +8,7 @@ import yaml
 from team_wiki.core import index_workspace, init_team, register_source
 from team_wiki.evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
 from team_wiki.impact import refresh_source
-from team_wiki.intake import intake_source
+from team_wiki.intake import intake_source, source_pipeline_status
 
 
 class V04Tests(unittest.TestCase):
@@ -139,6 +139,67 @@ class V04Tests(unittest.TestCase):
             rows = list_bindings(root, target_id="CAND-ORDER-PHONE")
             self.assertEqual(rows[0]["evidence_id"], evidence_id)
             self.assertEqual(rows[0]["relation"], "supports")
+
+    def test_source_status_and_evidence_binding_drive_impact(self):
+        with TemporaryDirectory() as td:
+            root = Path(td) / "kb"
+            init_team(root, "demo-team")
+            src = Path(td) / "policy.md"
+            src.write_text("# 规则\\n第一版规则。", encoding="utf-8")
+            pkg = register_source(
+                root,
+                src,
+                "规则来源",
+                connector_id="git",
+                upstream_id="project-a:docs/policy.md",
+                logical_path="项目A/业务规则",
+            )
+            source_id = yaml.safe_load((pkg / "source.yml").read_text(encoding="utf-8"))["source_id"]
+            intake = intake_source(root, source_id, max_chars=500)
+            manifest = json.loads((intake / "manifest.json").read_text(encoding="utf-8"))
+            evidence_id = manifest["chunks"][0]["evidence_id"]
+
+            k = root / "wiki/business/demo/rule.md"
+            k.parent.mkdir(parents=True, exist_ok=True)
+            (k.parent / "INDEX.md").write_text("# demo\\n", encoding="utf-8")
+            k.write_text(
+                """---
+id: K-BIND
+type: rule
+status: draft
+title: 通过证据绑定关联的规则
+owner: demo
+confidence: unknown
+summary: 用于验证 evidence binding 的影响传播。
+tags: [demo]
+related: []
+evidence: []
+---
+# 通过证据绑定关联的规则
+""",
+                encoding="utf-8",
+            )
+            bind_evidence(
+                root,
+                evidence_id,
+                target_kind="knowledge",
+                target_id="K-BIND",
+                relation="supports",
+            )
+
+            status = source_pipeline_status(root, source_id)
+            self.assertEqual(status["acquisition"]["state"], "acquired")
+            self.assertEqual(status["processing"]["state"], "completed")
+            self.assertEqual(status["evidence"]["state"], "ready")
+            self.assertEqual(status["indexing"]["state"], "not-indexed")
+
+            v2 = Path(td) / "policy-v2.md"
+            v2.write_text("# 规则\\n第二版规则，增加条件。", encoding="utf-8")
+            result = refresh_source(root, source_id, v2, owner="demo")
+            affected = {x["knowledge_id"]: x for x in result["affected"]}
+            self.assertIn("K-BIND", affected)
+            self.assertIn("evidence-binding", affected["K-BIND"]["basis"])
+
 
     def test_source_index_exposes_logical_origin_without_moving_source(self):
         with TemporaryDirectory() as td:
