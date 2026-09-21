@@ -131,32 +131,38 @@ def refresh_source(
     meta["revisions"] = revisions
 
     affected = knowledge_using_source(root, source_id)
-    change_path = create_change(root, f"复核来源 {source_id} 更新影响", owner)
-    change_meta, _ = parse_frontmatter(change_path)
-    change_id = change_meta["change_id"]
+    change_id = None
+    review_id = None
 
-    review_path = upsert_review(
-        root,
-        kind="confirm",
-        title=f"来源 {source_id} 已更新，需要复核依赖知识",
-        description="来源内容发生变化；需要确认依赖它的知识是否仍然成立、需收窄范围或需要修订。",
-        owner=owner,
-        scope_key=f"source:{source_id}",
-        affected=affected,
-        linked_changes=[change_id],
-        evidence_version=new_hash,
-        observation=f"source revision changed from {old_hash} to {new_hash}",
-    )
-    review_meta, _ = parse_frontmatter(review_path)
-    review_id = review_meta["review_id"]
+    # A source revision is not automatically a knowledge change. Open CHG/Review
+    # only when published/draft knowledge explicitly depends on this source.
+    if affected:
+        change_path = create_change(root, f"复核来源 {source_id} 更新影响", owner)
+        change_meta, _ = parse_frontmatter(change_path)
+        change_id = change_meta["change_id"]
 
-    _rewrite_change_meta(change_path, {
-        "origin": {"work_ids": [], "source_ids": [source_id]},
-        "affected": affected,
-        "review_ids": [review_id],
-        "evidence_ids": [],
-    })
-    meta["linked_changes"] = list(dict.fromkeys([*(meta.get("linked_changes") or []), change_id]))
+        review_path = upsert_review(
+            root,
+            kind="confirm",
+            title=f"来源 {source_id} 已更新，需要复核依赖知识",
+            description="来源内容发生变化；需要确认依赖它的知识是否仍然成立、需收窄范围或需要修订。",
+            owner=owner,
+            scope_key=f"source:{source_id}",
+            affected=affected,
+            linked_changes=[change_id],
+            evidence_version=new_hash,
+            observation=f"source revision changed from {old_hash} to {new_hash}",
+        )
+        review_meta, _ = parse_frontmatter(review_path)
+        review_id = review_meta["review_id"]
+
+        _rewrite_change_meta(change_path, {
+            "origin": {"work_ids": [], "source_ids": [source_id]},
+            "affected": affected,
+            "review_ids": [review_id],
+            "evidence_ids": [],
+        })
+        meta["linked_changes"] = list(dict.fromkeys([*(meta.get("linked_changes") or []), change_id]))
     write_yaml(meta_path, meta)
     index_workspace(root)
     return {

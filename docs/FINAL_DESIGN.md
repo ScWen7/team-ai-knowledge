@@ -667,3 +667,93 @@ acquired → processed → evidence ready → indexed → compiled → published
 - `changes/`。
 
 内部仍由 knowledge-kit、project-wiki 已适配能力和 llm_wiki 已适配能力共同服务同一 K/E/W/CHG 契约。
+
+
+---
+
+## 22. Evidence 到正式知识的安全修改与持续 Git 来源
+
+V0.5 将 Evidence Layer 继续向两端延伸：向上连接 Candidate/Patch Plan，向下连接本地 Git 项目的持续来源同步。
+
+### 22.1 Candidate 是变更过程中的临时语义对象
+
+Candidate 用于表达“当前 Agent/责任人认为这些 Evidence 可能意味着什么”。它不是正式 Knowledge，也不改变 K/E/W/CHG 四个核心业务对象。
+
+Candidate 必须绑定具体 Evidence，随后显式声明与已有 Knowledge 的关系：
+
+```text
+new / adds / narrows / contradicts / duplicates
+```
+
+程序不根据相似度、引用次数或 LLM 输出自行决定该关系。
+
+### 22.2 Patch Plan 将语义判断转换为可验证写入
+
+Patch Plan 保存：
+
+- Candidate；
+- comparison；
+- target knowledge ID/path；
+- target base content hash；
+- Evidence IDs/current hashes/source revisions；
+- CHG；
+- 必要 Review；
+- Agent 给出的变更摘要。
+
+当前 Agent 使用 `patch-context` 读取原知识与具体 Evidence，生成完整 Markdown 修订稿。
+
+确定性 `patch-apply` 在写入前重新检查：
+
+1. 目标 Knowledge 未发生并发变化；
+2. Evidence 未发生纠正/版本变化；
+3. Markdown ID 与目标一致；
+4. 新 Knowledge ID 尚不存在。
+
+任一前提变化都使旧 Plan stale，必须重新比较。
+
+应用完成只表示贡献分支中的正文已按 Plan 修改，CHG 进入 proposed；是否正式发布仍由 Git 审核/发布规则决定。
+
+### 22.3 本地 Git Connector 是首个持续来源实现
+
+Git Connector 的共享状态只保存：
+
+- connector ID；
+- repository identity；
+- include scope；
+- logical root；
+- checkpoint；
+- tracked/retired source mapping。
+
+本地绝对 checkout 路径不提交到团队知识仓库，每次同步由成员/Agent 在已有授权下提供。
+
+首次同步从指定 Git commit 建立 Source；后续同步使用 commit checkpoint 计算增量：
+
+```text
+add / modify / rename / delete / scope-remove
+```
+
+rename 通过 tracked mapping 保持原 source_id；modify 产生新 source revision；delete 保留历史证据并标记 deleted-upstream；rename 移出监控范围只标记 out-of-scope，不伪装成上游删除。
+
+### 22.4 Checkpoint 代表完整批次完成
+
+每次同步建立 SYNC 记录，保存 from/to commit、事件、已处理事件、错误与计数。
+
+只有全部事件完成才推进 connector checkpoint。失败时 checkpoint 保持旧值，下一次重新从旧 checkpoint 计算；Source 操作必须保持幂等，避免重试制造重复来源或重复修订。
+
+### 22.5 V0.5 后的完整链
+
+```text
+Git / manual source
+  → Source identity + revision
+  → Processing + Evidence chunks
+  → Candidate + Evidence bindings
+  → explicit comparison
+  → Knowledge Patch Plan
+  → CHG / Review
+  → Agent-produced Markdown
+  → deterministic stale-safe apply
+  → Git review / publish
+  → later Work adoption
+```
+
+下一阶段重点不再是增加对象，而是处理多来源聚合、Overview/Analysis 依赖影响、发布记录和后续采用验证。
