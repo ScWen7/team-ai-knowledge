@@ -8,3 +8,10 @@ llm_wiki:
 notes:
   - "V0.1 does not copy upstream implementation code."
   - "Future reuse must record module-level license and test obligations."
+
+weknora:
+  repository: Tencent/WeKnora
+  ref: 7fa6f028fcea9e08720db1f565ec4911ea0e7aa6
+  usage: design-reference-only
+  notes:
+    - "V0.4 adopts source/evidence processing concepts but does not copy WeKnora implementation code."

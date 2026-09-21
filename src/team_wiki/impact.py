@@ -24,13 +24,18 @@ from .core import (
 )
 from .intake import find_source_meta
 from .review import upsert_review
+from .evidence import list_bindings
 
 
 def knowledge_using_source(root: Path, source_id: str) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+    repository_id = read_yaml(root / ".knowledge/config.yml").get("repository_id")
+    rows: dict[str, dict[str, Any]] = {}
+
+    # Direct source references declared in formal knowledge frontmatter.
     for path in iter_knowledge_files(root):
         meta, _ = parse_frontmatter(path)
-        if not meta.get("id"):
+        kid = meta.get("id")
+        if not kid:
             continue
         matched = False
         for item in meta.get("evidence", []) or []:
@@ -41,13 +46,40 @@ def knowledge_using_source(root: Path, source_id: str) -> list[dict[str, Any]]:
                 matched = True
                 break
         if matched:
-            rows.append({
-                "repository_id": read_yaml(root / ".knowledge/config.yml").get("repository_id"),
-                "knowledge_id": meta["id"],
+            rows[str(kid)] = {
+                "repository_id": repository_id,
+                "knowledge_id": kid,
                 "path": str(path.relative_to(root)),
                 "status": meta.get("status"),
-            })
-    return rows
+                "basis": ["knowledge-frontmatter"],
+            }
+
+    # Evidence-chunk bindings are a second, more precise provenance path.
+    for binding in list_bindings(root):
+        if binding.get("source_id") != source_id or binding.get("target_kind") != "knowledge":
+            continue
+        kid = str(binding.get("target_id"))
+        try:
+            kpath, meta, _ = next(
+                (p, m, d)
+                for p in iter_knowledge_files(root)
+                for m, _body in [parse_frontmatter(p)]
+                for d in [""]
+                if str(m.get("id")) == kid
+            )
+        except StopIteration:
+            continue
+        row = rows.setdefault(kid, {
+            "repository_id": repository_id,
+            "knowledge_id": kid,
+            "path": str(kpath.relative_to(root)),
+            "status": meta.get("status"),
+            "basis": [],
+        })
+        if "evidence-binding" not in row["basis"]:
+            row["basis"].append("evidence-binding")
+
+    return sorted(rows.values(), key=lambda x: str(x["knowledge_id"]))
 
 
 def refresh_source(

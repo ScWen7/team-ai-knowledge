@@ -574,3 +574,96 @@ llm_wiki:
 上游能力需要按模块记录“直接复用 / 适配复用 / 保留机制 / 暂缓 / 裁剪”。不能一边说复用，一边无理由全部重写；也不能为了复用几个模块先重构完整桌面应用。
 
 许可和间接依赖必须在实际代码复用前再次核查。
+
+
+---
+
+## 21. WeKnora 对来源与证据层的补强
+
+V2.1 的 K / E / W / CHG 闭环保持不变，但 Evidence（E）进一步具体化为：
+
+```text
+来源连接 / 人工投递
+  → 稳定 source identity
+  → source revision
+  → versioned processing
+  → structured evidence chunks
+  → correction / evidence binding
+  → candidate or existing knowledge diff
+  → CHG / Review
+  → 正式知识修订与发布
+```
+
+### 21.1 来源身份与来源修订分离
+
+来源身份描述“上游是哪一份材料”；修订描述“这次取得的内容版本”。
+
+有上游稳定 ID 时，`source_id` 由 `connector + upstream_id` 生成；内容哈希只描述修订。手工投递且没有稳定上游 ID 时，允许内容哈希作为去重 fallback。
+
+本地存储路径、来源逻辑路径和正式知识归属相互独立，不通过复制原件实现多视图。
+
+### 21.2 处理配置必须可追溯
+
+每次解析记录：
+
+- source revision；
+- parser + parser version；
+- effective processing config；
+- coverage / warnings；
+- processing state；
+- 产物位置。
+
+解析器或配置变化可以触发受影响阶段重跑，不要求重新获取未变化的原件，也不能静默覆盖已审核的知识正文。
+
+### 21.3 Evidence Chunk 不是知识条目
+
+证据片段保存：
+
+- evidence_id；
+- source / source revision；
+- processing_id；
+- heading/path/position 等真实 locator；
+- content sha；
+- index state。
+
+小片段用于查找和引用，正式知识仍表达团队整理后的结论、适用条件和例外。
+
+### 21.4 原始解析与人工纠正分离
+
+parser output 保持不可变。OCR、文本抽取等错误的人工纠正以独立 correction record 保存，记录修改前后哈希、理由、核对者和证据修订。
+
+读取 Evidence 默认可以返回当前纠正后的可用文本，但 raw parser output 始终可追溯。重新解析产生新的 evidence_id，不自动把旧纠正套到新产物。
+
+### 21.5 候选知识先绑定证据，再编译语言
+
+知识编译不只在最后附“参考文档”，而应先建立：
+
+```text
+candidate / knowledge
+  ↕ supports / limits / contradicts / relevant
+evidence chunk
+```
+
+然后再与现有 K 比较，生成 CHG。引用存在只证明定位合法，不证明其语义支持结论；正式发布仍需要 Agent/责任方做语义核查。
+
+### 21.6 处理阶段分别可见
+
+来源处理至少区分：
+
+```text
+acquired → processed → evidence ready → indexed → compiled → published
+```
+
+当前实现阶段可以缺失，但不能把前一阶段成功冒充后一阶段成功。索引失败不必阻断基于原文 Evidence 的知识编译；向量可查询也不代表知识已经发布。
+
+### 21.7 WeKnora 的采用边界
+
+我们吸收其来源同步、处理配置、Chunk 结构、证据接地、批量归并和状态治理思路，但不把 WeKnora 作为第三个必须运行的平台。
+
+普通成员入口继续只有：
+
+- `sources/`；
+- `wiki/`；
+- `changes/`。
+
+内部仍由 knowledge-kit、project-wiki 已适配能力和 llm_wiki 已适配能力共同服务同一 K/E/W/CHG 契约。
