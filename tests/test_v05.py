@@ -238,6 +238,30 @@ evidence: []
             with self.assertRaisesRegex(ValueError, "evidence changed"):
                 apply_patch_plan(root, plan_id, proposed)
 
+    def test_new_plan_rejects_existing_knowledge_id(self):
+        with TemporaryDirectory() as td:
+            root = Path(td) / "kb"
+            init_team(root, "demo-team")
+            self._knowledge(root, "K-ORDER")
+            evidence_id = self._evidence(root)
+            candidate = create_candidate(
+                root,
+                proposed_id="K-ORDER",
+                title="重复 ID 候选",
+                knowledge_type="rule",
+                statement="试图用 new 创建已有 ID。",
+            )
+            candidate_id = yaml.safe_load(candidate.read_text(encoding="utf-8"))["candidate_id"]
+            bind_evidence(root, evidence_id, target_kind="candidate", target_id=candidate_id, relation="supports")
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                create_patch_plan(
+                    root,
+                    candidate_id,
+                    comparison="new",
+                    summary="不应创建。",
+                    target_path="wiki/business/orders/new-rule.md",
+                )
+
     def _git(self, repo: Path, *args: str) -> str:
         cp = subprocess.run(["git", "-C", str(repo), *args], text=True, capture_output=True, check=True)
         return cp.stdout.strip()
@@ -317,6 +341,48 @@ evidence: []
             no_change = sync_git_connector(root, "project_a", project, owner="demo")
             self.assertFalse(no_change["changed"])
             self.assertEqual(no_change["events"], [])
+
+    def test_git_rename_out_of_scope_is_not_upstream_delete(self):
+        with TemporaryDirectory() as td:
+            base = Path(td)
+            project = base / "project"
+            project.mkdir()
+            self._git(project, "init", "-q")
+            self._git(project, "config", "user.email", "demo@example.com")
+            self._git(project, "config", "user.name", "Demo")
+            (project / "docs").mkdir()
+            (project / "archive").mkdir()
+            (project / "docs/a.md").write_text("# A\n内容\n", encoding="utf-8")
+            self._git(project, "add", ".")
+            self._git(project, "commit", "-qm", "initial")
+
+            root = base / "kb"
+            init_team(root, "demo-team")
+            create_git_connector(
+                root,
+                "scope_test",
+                repository_id="project-a",
+                include_paths=["docs"],
+            )
+            sync_git_connector(root, "scope_test", project)
+            source_id = connector_status(root, "scope_test")["tracked"]["docs/a.md"]
+
+            self._git(project, "mv", "docs/a.md", "archive/a.md")
+            self._git(project, "commit", "-qm", "move out of scope")
+            result = sync_git_connector(root, "scope_test", project)
+            self.assertEqual(result["counts"]["scope-remove"], 1)
+            state = connector_status(root, "scope_test")
+            self.assertNotIn("docs/a.md", state["tracked"])
+            self.assertEqual(state["retired"]["docs/a.md"], source_id)
+
+            pkg = next(
+                p.parent for p in (root / "sources").rglob("source.yml")
+                if yaml.safe_load(p.read_text(encoding="utf-8"))["source_id"] == source_id
+            )
+            meta = yaml.safe_load((pkg / "source.yml").read_text(encoding="utf-8"))
+            self.assertEqual(meta["status"], "out-of-scope")
+            self.assertNotIn("deleted_upstream_commit", meta)
+
 
 
 if __name__ == "__main__":
