@@ -284,35 +284,40 @@ def _delete(
         }
 
     affected = knowledge_using_source(root, source_id)
-    change = create_change(root, f"复核已删除来源 {source_id}", owner)
-    change_meta, _ = parse_frontmatter(change)
-    change_id = change_meta["change_id"]
-    review = upsert_review(
-        root,
-        kind="confirm",
-        title=f"来源 {source_id} 已从 Git 上游删除",
-        description="上游 Git diff 明确报告删除；需要确认依赖知识是否仍有其他有效依据。",
-        owner=owner,
-        scope_key=f"source:{source_id}",
-        affected=affected,
-        linked_changes=[change_id],
-        evidence_version=f"deleted:{commit}",
-        observation=f"git path deleted at {commit}: {path}",
-    )
-    review_meta, _ = parse_frontmatter(review)
-    review_id = review_meta["review_id"]
-    _rewrite_change_meta(change, {
-        "origin": {"work_ids": [], "source_ids": [source_id]},
-        "affected": affected,
-        "review_ids": [review_id],
-        "evidence_ids": [],
-    })
+    change_id = None
+    review_id = None
+    if affected:
+        change = create_change(root, f"复核已删除来源 {source_id}", owner)
+        change_meta, _ = parse_frontmatter(change)
+        change_id = change_meta["change_id"]
+        review = upsert_review(
+            root,
+            kind="confirm",
+            title=f"来源 {source_id} 已从 Git 上游删除",
+            description="上游 Git diff 明确报告删除；需要确认依赖知识是否仍有其他有效依据。",
+            owner=owner,
+            scope_key=f"source:{source_id}",
+            affected=affected,
+            linked_changes=[change_id],
+            evidence_version=f"deleted:{commit}",
+            observation=f"git path deleted at {commit}: {path}",
+        )
+        review_meta, _ = parse_frontmatter(review)
+        review_id = review_meta["review_id"]
+        _rewrite_change_meta(change, {
+            "origin": {"work_ids": [], "source_ids": [source_id]},
+            "affected": affected,
+            "review_ids": [review_id],
+            "evidence_ids": [],
+        })
 
     meta["status"] = "deleted-upstream"
     meta["deleted_at"] = utc_now()
     meta["deleted_upstream_commit"] = commit
-    meta["deletion_change_id"] = change_id
-    meta["deletion_review_id"] = review_id
+    if change_id:
+        meta["deletion_change_id"] = change_id
+    if review_id:
+        meta["deletion_review_id"] = review_id
     write_yaml(meta_path, meta)
     return {
         "source_id": source_id,
