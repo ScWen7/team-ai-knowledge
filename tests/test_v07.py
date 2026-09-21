@@ -326,6 +326,49 @@ evidence: []
             with self.assertRaisesRegex(ValueError, "knowledge.lock changed"):
                 finalize_project_work(project, team, work_id)
 
+    def test_effective_update_is_not_hidden_by_newer_scheduled_publication(self):
+        with TemporaryDirectory() as td:
+            base = Path(td)
+            team = base / "team"
+            self._init_team_repo(team)
+
+            self._publish(
+                team,
+                body="版本1。",
+                requirement="notice",
+                label="v1",
+            )
+            project = base / "project"
+            self._init_project(project)
+            lock_latest(project, team)
+
+            pub2 = self._publish(
+                team,
+                body="版本2 已生效，需要评审。",
+                requirement="review-required",
+                label="v2",
+            )
+            pub3 = self._publish(
+                team,
+                body="版本3 未来强制升级。",
+                requirement="must-address",
+                label="v3-future",
+                effective_at="2999-01-01T00:00:00+00:00",
+            )
+
+            row = project_status(project, team)["rows"][0]
+            self.assertEqual(row["state"], "update-available")
+            self.assertEqual(
+                row["latest"]["publication_id"],
+                pub2["publication_id"],
+            )
+            self.assertEqual(
+                row["scheduled"]["publication_id"],
+                pub3["publication_id"],
+            )
+            self.assertTrue(project_gate(project, team, phase="start")["ok"])
+            self.assertFalse(project_gate(project, team, phase="release")["ok"])
+
     def test_future_publication_does_not_replace_effective_lock(self):
         with TemporaryDirectory() as td:
             base = Path(td)
