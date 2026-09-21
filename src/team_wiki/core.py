@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.3.0"
+KIT_VERSION = "0.4.0"
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
@@ -163,9 +163,46 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
     )
 
 
-def register_source(root: Path, file_path: Path, title: str | None = None, move: bool = False) -> Path:
+def _find_source_package(root: Path, source_id: str) -> Path | None:
+    for meta in (root / "sources").rglob("source.yml"):
+        try:
+            data = read_yaml(meta)
+        except Exception:
+            continue
+        if data.get("source_id") == source_id:
+            return meta.parent
+    return None
+
+
+def register_source(
+    root: Path,
+    file_path: Path,
+    title: str | None = None,
+    move: bool = False,
+    *,
+    connector_id: str = "manual",
+    upstream_id: str | None = None,
+    logical_path: str | None = None,
+) -> Path:
     data = file_path.read_bytes()
-    source_id = f"SRC-{short_hash(data)}"
+    digest = hashlib.sha256(data).hexdigest()
+    if upstream_id:
+        identity_key = f"{connector_id}::{upstream_id}".encode()
+        source_id = f"SRC-{short_hash(identity_key, 10)}"
+        identity_mode = "upstream"
+    else:
+        source_id = f"SRC-{short_hash(data)}"
+        identity_mode = "content-fallback"
+
+    existing = _find_source_package(root, source_id)
+    if existing is not None:
+        meta = read_yaml(existing / "source.yml")
+        if meta.get("content_sha256") == digest:
+            return existing
+        raise ValueError(
+            f"source {source_id} already exists with different content; use refresh-source"
+        )
+
     now = datetime.now()
     source_title = title or file_path.stem
     pkg = root / "sources" / f"{now.year:04d}" / f"{now.month:02d}" / f"{source_id}-{slugify(source_title)}"
@@ -175,21 +212,27 @@ def register_source(root: Path, file_path: Path, title: str | None = None, move:
         raise ValueError(f"source collision: {dest}")
     if not dest.exists():
         shutil.move(str(file_path), dest) if move else shutil.copy2(file_path, dest)
-    meta = pkg / "source.yml"
-    if not meta.exists():
-        write_yaml(
-            meta,
-            {
-                "source_id": source_id,
-                "title": source_title,
-                "registered_at": utc_now(),
-                "content_sha256": hashlib.sha256(data).hexdigest(),
-                "original_name": file_path.name,
-                "status": "registered",
-                "visibility": "team",
-                "linked_changes": [],
+
+    write_yaml(
+        pkg / "source.yml",
+        {
+            "source_id": source_id,
+            "title": source_title,
+            "registered_at": utc_now(),
+            "content_sha256": digest,
+            "original_name": file_path.name,
+            "status": "registered",
+            "visibility": "team",
+            "origin": {
+                "identity_mode": identity_mode,
+                "connector_id": connector_id,
+                "upstream_id": upstream_id,
+                "logical_path": logical_path,
             },
-        )
+            "linked_changes": [],
+            "revisions": [],
+        },
+    )
     return pkg
 
 
