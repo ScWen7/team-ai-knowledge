@@ -163,7 +163,6 @@ def refresh_source(
             "evidence_ids": [],
         })
         meta["linked_changes"] = list(dict.fromkeys([*(meta.get("linked_changes") or []), change_id]))
-    meta["linked_changes"] = list(dict.fromkeys([*(meta.get("linked_changes") or []), change_id]))
     write_yaml(meta_path, meta)
     index_workspace(root)
     return {
