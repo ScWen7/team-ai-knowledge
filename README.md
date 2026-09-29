@@ -7,31 +7,29 @@
 | 角色 | 你要做什么 | 入口 |
 |---|---|---|
 | **产品经理 / 知识读者** | 看知识、交资料、提建议 | 浏览器打开仓库 → [`docs/PRODUCT_MANAGER_GUIDE.md`](docs/PRODUCT_MANAGER_GUIDE.md) |
-| **工程师 / 知识使用者** | 在项目里消费团队知识 | 下方"工程师高频 5 命令" |
+| **工程师 / 知识使用者** | 在项目里消费团队知识 | 下方"工程师高频 2 命令" |
 | **知识管理员 / 工具维护者** | 登记资料、审 CHG、发布、治理 | [`docs/FINAL_DESIGN.md`](docs/FINAL_DESIGN.md) |
 
-## 工程师高频 5 命令
+## 工程师高频 2 命令（V0.8 起）
 
-在一个**已接入团队知识库的项目**里，日常工作只需要这 5 条命令：
+在一个**已接入团队知识库的项目**里，一次任务只需要这 2 条命令：
 
 ```bash
-# 1. 开始一项工作：固定知识版本快照
-team-wiki project-prepare . <team-root> --goal "实现订单导入"
-# → 返回 work_id
+# 1. 开始：start 门禁 → 固定知识版本快照 → 直接返回锁定正文
+team-wiki project-work . <team-root> --phase start \
+  --goal "实现订单导入" --read K-A
+# → 返回 work_id 和 K-A 的锁定正文（从 Git 历史精确读取，不读当前工作树）
 
-# 2. 读取任务锁定的知识正文（不读当前工作树）
-team-wiki project-context . <team-root> <work-id> <knowledge-id>
-
-# 3. 标记真正影响产出的知识
-team-wiki project-adopt . <work-id> <knowledge-id> --used-for "实现 XX 功能"
-
-# 4. 记录验证结果
-team-wiki project-observe . <work-id> <knowledge-id> \
-  --outcome supported-in-scope --note "在 X 场景下验证通过"
-
-# 5. 收尾：发布前检查 + 回报团队
-team-wiki project-finalize . <team-root> <work-id>
+# 2. 收尾：记录采用与结果 → release 门禁 → 回报团队知识库
+team-wiki project-work . <team-root> --phase finish \
+  --work-id <work-id> \
+  --adopt K-A --used-for "实现导入校验" \
+  --observe "K-A:supported-in-scope:批量场景验证通过"
 ```
+
+> 门禁没有因此放松：`must-address` 仍在开始时阻断，`review-required` 仍在交付前阻断，
+> 任务中途 lock 变化仍会拒绝收尾。需要分步执行时用原来的 5 条命令：
+> `project-prepare / project-context / project-adopt / project-observe / project-finalize`。
 
 其他命令（`init / ingest / publish / doctor / connector / review / batch / patch-*` 等）属于**知识管理员路径**，普通工程师不需要掌握。
 
@@ -89,7 +87,7 @@ team-wiki publish . <change-id> <knowledge-id> --requirement review-required
 
 ## 快速开始（知识管理员）
 
-> 工程师日常使用请直接看上方"高频 5 命令"；本节仅面向第一次搭建知识库或做知识治理的管理员。
+> 工程师日常使用请直接看上方"高频 2 命令"；本节仅面向第一次搭建知识库或做知识治理的管理员。
 
 ```bash
 python -m venv .venv
@@ -210,8 +208,10 @@ V0.8 不增加业务对象，只削减使用路径：
 - `intake-decide`：一次调用决定整份 intake，逐块声明从 O(块数) 降到 O(1)；
 - 移除恒为假的 `indexing` 状态维度（LanceDB 未实现，字段永远为 `not-indexed`）；
 - `patch-plan-direct`：Candidate 降级为实现细节，内部记录与门禁完全不变；
+- `project-work`：项目侧 5 步收敛为 2 步，所有门禁照常执行；
 - Candidate Batch 标记为实验性，移出主推荐路径；
 - 修复 macOS 临时目录下 `patch-apply` 的路径崩溃。
 
-以 3 万字文档（7 块）修改一条知识为例，命令调用数从 17 降到 10。
-全部原命令与数据格式保留。详见 `docs/V0.8_SCOPE.md`。
+以 3 万字文档（7 块）修改一条知识为例，命令调用数从 17 降到 10；
+项目侧一次任务从 5 条降到 2 条。全部原命令与数据格式保留。
+详见 `docs/V0.8_SCOPE.md`。

@@ -772,3 +772,88 @@ def finalize_project_work(
         "adoption_ids": [p.stem for p in adoption_paths],
         "warnings": gate["warnings"],
     }
+
+
+def run_project_work(
+    project_root: Path,
+    team_root: Path,
+    *,
+    phase: str,
+    goal: str | None = None,
+    work_id: str | None = None,
+    read_knowledge: list[str] | None = None,
+    adopt: list[str] | None = None,
+    observations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run a project task's knowledge steps in one call.
+
+    ``phase="start"`` runs the start gate, snapshots ``knowledge.lock``, and
+    returns the locked body of every requested knowledge. ``phase="finish"``
+    records adoptions and observations, then runs the release gate and reports
+    adoption back to the team repository.
+
+    This is a convenience facade only. The three underlying commands stay
+    available, and every gate still runs, so a blocked gate raises exactly as
+    it would when the individual commands are invoked by hand.
+    """
+    if phase not in {"start", "finish"}:
+        raise ValueError(f"invalid project-work phase: {phase}")
+    if phase == "finish" and not work_id:
+        raise ValueError("project-work --phase finish requires --work-id")
+    if phase == "start" and not goal:
+        raise ValueError("project-work --phase start requires --goal")
+
+    if phase == "start":
+        work_id = prepare_project_work(project_root, team_root, goal=str(goal)).stem
+    active = str(work_id)
+
+    contexts = [
+        project_context(project_root, team_root, active, knowledge_id)
+        for knowledge_id in dict.fromkeys(read_knowledge or [])
+    ]
+
+    adoptions = []
+    for knowledge_id in dict.fromkeys(adopt or []):
+        used_for = next(
+            (
+                str(row.get("used_for") or "")
+                for row in (observations or [])
+                if row.get("knowledge_id") == knowledge_id
+            ),
+            "",
+        )
+        adoptions.append(
+            project_adopt(project_root, active, knowledge_id, used_for=used_for or "未说明具体用途")
+        )
+
+    observed = []
+    for row in observations or []:
+        knowledge_id = str(row.get("knowledge_id") or "")
+        if not knowledge_id:
+            raise ValueError("each --observe requires a knowledge id")
+        observed.append(
+            project_observe(
+                project_root,
+                active,
+                knowledge_id,
+                outcome=str(row.get("outcome")),
+                note=str(row.get("note") or ""),
+                evidence_ids=list(row.get("evidence_ids") or []),
+            )
+        )
+
+    finalized = (
+        finalize_project_work(project_root, team_root, active)
+        if phase == "finish"
+        else None
+    )
+
+    return {
+        "phase": phase,
+        "work_id": work_id,
+        "contexts": contexts,
+        "adoptions": adoptions,
+        "observations": observed,
+        "finalized": finalized,
+    }
+

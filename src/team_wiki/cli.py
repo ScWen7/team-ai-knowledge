@@ -34,6 +34,7 @@ from .project import (
     project_gate,
     project_observe,
     project_status,
+    run_project_work,
 )
 from .connector import connector_status, create_git_connector, sync_git_connector
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
@@ -89,6 +90,7 @@ def main():
     x = sub.add_parser("project-adopt"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("knowledge_id"); x.add_argument("--used-for", required=True)
     x = sub.add_parser("project-observe"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("knowledge_id"); x.add_argument("--outcome", required=True); x.add_argument("--note", required=True); x.add_argument("--evidence", action="append", default=[])
     x = sub.add_parser("project-finalize"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("work_id")
+    x = sub.add_parser("project-work"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--phase", required=True, choices=["start", "finish"]); x.add_argument("--goal"); x.add_argument("--work-id", dest="work_id_arg"); x.add_argument("--read", action="append", default=[]); x.add_argument("--adopt", action="append", default=[]); x.add_argument("--used-for", action="append", default=[]); x.add_argument("--observe", action="append", default=[], metavar="K-ID:OUTCOME[:NOTE]"); x.add_argument("--evidence", action="append", default=[], metavar="K-ID:EVIDENCE_ID")
 
     x = sub.add_parser("connector-add-git"); x.add_argument("root"); x.add_argument("connector_id"); x.add_argument("--repository-id", required=True); x.add_argument("--include", action="append", default=[]); x.add_argument("--logical-root"); x.add_argument("--auto-intake", action="store_true")
     x = sub.add_parser("connector-status"); x.add_argument("root"); x.add_argument("connector_id")
@@ -209,6 +211,32 @@ def main():
             dump(project_observe(root, a.work_id, a.knowledge_id, outcome=a.outcome, note=a.note, evidence_ids=a.evidence))
         elif a.cmd == "project-finalize":
             dump(finalize_project_work(root, Path(a.team_root).resolve(), a.work_id))
+        elif a.cmd == "project-work":
+            used_for = dict(str(x).partition("=")[::2] for x in a.used_for)
+            evidence_by_knowledge: dict[str, list[str]] = {}
+            for item in a.evidence:
+                key, _, value = str(item).partition(":")
+                if not key or not value:
+                    raise ValueError(f"--evidence expects K-ID:EVIDENCE_ID, got: {item}")
+                evidence_by_knowledge.setdefault(key, []).append(value)
+            observations = []
+            for item in a.observe:
+                parts = str(item).split(":", 2)
+                if len(parts) < 2 or not parts[0] or not parts[1]:
+                    raise ValueError(f"--observe expects K-ID:OUTCOME[:NOTE], got: {item}")
+                knowledge_id = parts[0]
+                observations.append({
+                    "knowledge_id": knowledge_id,
+                    "outcome": parts[1],
+                    "note": parts[2] if len(parts) > 2 else used_for.get(knowledge_id, ""),
+                    "used_for": used_for.get(knowledge_id, ""),
+                    "evidence_ids": evidence_by_knowledge.get(knowledge_id, []),
+                })
+            dump(run_project_work(
+                root, Path(a.team_root).resolve(), phase=a.phase,
+                goal=a.goal, work_id=a.work_id_arg,
+                read_knowledge=a.read, adopt=a.adopt, observations=observations,
+            ))
         elif a.cmd == "connector-add-git":
             print(create_git_connector(root, a.connector_id, repository_id=a.repository_id, include_paths=a.include or ["."], logical_root=a.logical_root, auto_intake=a.auto_intake))
         elif a.cmd == "connector-status": dump(connector_status(root, a.connector_id))
