@@ -1,7 +1,7 @@
-# Team Knowledge
+# 历史兼容示例
 
-- 交资料：`sources/inbox/`
-- 看正式知识：`wiki/INDEX.md`
-- 看修改和待确认问题：`changes/INDEX.md`
+本目录保留早期团队知识库的资料、变更与索引，用于兼容追溯；不是新成员的默认使用模板。
 
-> `wiki/` 中的内容只有在已审核发布分支/快照上才属于正式知识。
+普通查阅可从 [知识导航](wiki/INDEX.md) 进入，或请当前 Agent 查找、读原文并解释适用条件。贡献优先修订原文，不要求沿用本目录的历史登记记录。
+
+新建普通团队库使用 `team-wiki init`。完整的合成使用检查见工具仓库 `scripts/check_member_workflow.py`。示例内容不代表真实业务结论。

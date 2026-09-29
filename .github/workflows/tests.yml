@@ -1,0 +1,35 @@
+name: deterministic-tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install in virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e .
+      - name: Regression tests
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Synthetic member workflow
+        run: .venv/bin/python scripts/check_member_workflow.py
+      - name: Diff whitespace check
+        run: git diff --check

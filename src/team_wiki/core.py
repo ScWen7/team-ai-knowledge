@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.9.0"
+KIT_VERSION = "0.9.1"
 
 
 def utc_now() -> str:
@@ -69,19 +69,18 @@ def git_info(root: Path) -> dict[str, Any]:
 
 
 def init_team(root: Path, repository_id: str | None = None) -> None:
+    from .agent_entry import _block
     rid = repository_id or root.name
+    for rel in (".knowledge", ".knowledge/config.yml", ".knowledge/local.yml", ".gitignore", "README.md", "AGENTS.md", "wiki", "sources"):
+        if (root / rel).is_symlink():
+            raise ValueError(f"initialization refuses a symlink at {rel}")
     for rel in [
         "sources/inbox",
-        "sources/evidence",
         "wiki/team-conventions",
         "wiki/technical",
         "wiki/business",
         "wiki/projects",
-        "changes/views",
-        "changes/reviews",
-        ".knowledge/records",
-        ".knowledge/runs",
-        ".knowledge/cache",
+        ".knowledge",
     ]:
         (root / rel).mkdir(parents=True, exist_ok=True)
 
@@ -89,27 +88,27 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
         root / "README.md",
         """# Team Knowledge
 
-- 交资料：`sources/inbox/`
-- 看正式知识：`wiki/INDEX.md`
-- 看修改和待确认问题：`changes/INDEX.md`
+先向当前 Agent 描述正在处理的问题；它应查找资料、读原文，再说明适用条件和下一步。
+自己浏览：[知识导航](wiki/INDEX.md)。资料可放 `sources/inbox/`，说明用途与来源即可，无需登记。
+已有结论优先修改原文；没有值得保留的新结论，不必另写材料。提交不等于审核完成。
 
-> `wiki/` 中的内容只有在已审核发布分支/快照上才属于正式知识。
+## 维护约定
+接入维护者请在现有协作渠道说明谁确认重要结论、在哪里审核。
+此模板没有预先指定负责人或审核渠道；未配置时只准备修改，不声称已提交给某人或已审核。
+不保存密钥或未经授权的受限资料。
 """,
     )
     ensure_file(
         root / "AGENTS.md",
-        """# Team knowledge workflow
-
-按任务使用 `team-wiki search` 查找知识，核对状态、适用范围和来源后读取正文。未找到时明确说明限制。项目共同底线使用 `team-wiki project-rules` 完整读取，不以检索排名替代。新事实和经验写入所属项目或团队知识库，按既有审核渠道确认；不得把格式通过、搜索命中或采用记录当成业务验证。Work 追溯仅在明确需要时使用。
-""",
+        "# Team knowledge workflow\n\n" + _block(False),
     )
     ensure_file(
         root / "wiki/PURPOSE.md",
         """# Purpose
 
 ## 服务目标
-- 让成员和 Agent 找到可追溯的正式知识。
-- 让真实工作产生的证据能够修正既有知识。
+- 需要帮助时找到适用、可信的经验，少重复排查。
+- 有价值的新结论利用已有工作记录留下；错误在原文纠正。
 
 ## 收录边界
 - 收录团队约定、跨项目技术知识、业务知识和项目入口。
@@ -126,15 +125,6 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
     ]:
         ensure_file(root / "wiki" / rel / "INDEX.md", f"# {title}\n\n暂无条目。\n")
     ensure_file(root / "sources/INDEX.md", "# Sources Index\n\n> 由 `team-wiki index` 更新。\n")
-    ensure_file(root / "changes/INDEX.md", "# Changes Index\n\n> 由 `team-wiki index` 更新。\n")
-    ensure_file(root / "changes/reviews/INDEX.md", "# Reviews Index\n\n> 由 `team-wiki index` 更新。\n")
-    for name, title in [
-        ("open.md", "Open Changes"),
-        ("blocked.md", "Blocked Changes"),
-        ("recently-published.md", "Recently Published"),
-    ]:
-        ensure_file(root / "changes/views" / name, f"# {title}\n\n暂无。\n")
-
     cfg = root / ".knowledge/config.yml"
     if not cfg.exists():
         write_yaml(
@@ -157,10 +147,12 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
             },
         )
     ensure_file(root / ".knowledge/local.yml", "# 本机私有路径映射，不提交\nrepositories: {}\n")
-    ensure_file(
-        root / ".gitignore",
-        ".knowledge/local.yml\n.knowledge/runs/\n.knowledge/cache/\n.venv/\n__pycache__/\n*.pyc\n",
-    )
+    ignore = root / ".gitignore"
+    current = ignore.read_text(encoding="utf-8") if ignore.exists() else ""
+    needed = [".knowledge/local.yml", ".knowledge/runs/", ".knowledge/cache/", ".venv/", "__pycache__/", "*.pyc"]
+    missing = [line for line in needed if line not in current.splitlines()]
+    if missing:
+        ignore.write_text(current + ("\n" if current and not current.endswith("\n") else "") + "\n".join(missing) + "\n", encoding="utf-8")
 
 
 def _find_source_package(root: Path, source_id: str) -> Path | None:
@@ -265,7 +257,7 @@ def index_workspace(root: Path) -> None:
         if not report["ok"]:
             raise ValueError("; ".join(report["errors"]))
         return
-    lines = ["# Wiki Index", "", "> 正式知识导航；正文是否正式以当前发布分支/快照为准。", ""]
+    lines = ["# 知识导航", "", "> 核对原文、来源和适用条件；目录位置和状态标签不代表已审核。", ""]
     for rel, label in [
         ("team-conventions", "团队约定"),
         ("technical", "技术知识"),
@@ -320,10 +312,14 @@ def index_workspace(root: Path) -> None:
             f"`{data.get('status','?')}` — `{rel}`{suffix_text}"
         )
     (root / "sources/INDEX.md").write_text(
-        "# Sources Index\n\n" + ("\n".join(src_rows) if src_rows else "暂无已登记来源。") + "\n",
+        "# 参考资料\n\n[投递资料](inbox/)：按需阅读，保留用途与来源；不要求登记或全部转成知识。\n\n" + ("## 历史登记资料\n\n" + "\n".join(src_rows) if src_rows else "") + "\n",
         encoding="utf-8",
     )
 
+    if not iter_changes(root) and not list((root / "changes/reviews").rglob("REV-*.md")) and not (root / "changes/INDEX.md").exists():
+        return
+    (root / "changes/views").mkdir(parents=True, exist_ok=True)
+    (root / "changes/reviews").mkdir(parents=True, exist_ok=True)
     rows, opened, blocked, published = [], [], [], []
     for p in sorted(iter_changes(root)):
         meta, _ = parse_frontmatter(p)
@@ -534,7 +530,6 @@ def doctor(root: Path) -> CheckResult:
         "wiki/INDEX.md",
         "wiki/PURPOSE.md",
         "wiki/OVERVIEW.md",
-        "changes/INDEX.md",
         ".knowledge/config.yml",
     ]:
         if not (root / rel).exists():
@@ -561,8 +556,10 @@ def doctor(root: Path) -> CheckResult:
             warnings.append(f"knowledge file without frontmatter: {path.relative_to(root)}")
             continue
         kid = meta.get("id")
-        if not isinstance(kid, str) or not kid.strip():
-            errors.append(f"knowledge file missing id: {path.relative_to(root)}")
+        if kid is None:
+            warnings.append(f"optional knowledge id missing: {path.relative_to(root)}")
+        elif not isinstance(kid, str) or not kid.strip():
+            errors.append(f"invalid knowledge id: {path.relative_to(root)}")
         elif kid in ids:
             errors.append(
                 f"duplicate knowledge id {kid}: {ids[kid]} and {path.relative_to(root)}"
@@ -624,12 +621,16 @@ def doctor(root: Path) -> CheckResult:
 # --- V0.2: normalized knowledge graph + work/evidence loop ---
 
 def knowledge_ref(root: Path, knowledge_id: str) -> tuple[Path, dict[str, Any], str]:
+    matches = []
     for path in iter_knowledge_files(root):
         meta, _ = parse_frontmatter(path)
         if meta.get("id") == knowledge_id:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            return path, meta, digest
-    raise KeyError(f"knowledge id not found: {knowledge_id}")
+            matches.append((path, meta, hashlib.sha256(path.read_bytes()).hexdigest()))
+    if len(matches) > 1:
+        raise ValueError(f"ambiguous knowledge id {knowledge_id}: resolve duplicate IDs before exact use")
+    if not matches:
+        raise KeyError(f"knowledge id not found: {knowledge_id}")
+    return matches[0]
 
 
 def related(root: Path, knowledge_id: str, limit: int = 5, *,

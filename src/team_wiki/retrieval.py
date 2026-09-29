@@ -44,6 +44,8 @@ def _read_config(root: Path) -> dict[str, Any]:
         config = core.read_yaml(path) if path.is_file() else {}
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise ValueError(f"cannot read .knowledge/config.yml: {exc}") from exc
+    if config.get("version", 1) != 1:
+        raise ValueError("unsupported knowledge config version")
     if config.get("profile", "team") not in (None, "team", "project"):
         raise ValueError(f"unsupported team-wiki profile for retrieval: {config.get('profile')}")
     return config
@@ -69,6 +71,8 @@ def _read_document(root: Path, path: Path) -> _Document:
             identity = meta.get("id")
             if identity is not None and (not isinstance(identity, str) or not identity.strip()):
                 raise ValueError(f"knowledge id must be a non-empty string: {relative}")
+            from .documents import _guess_title
+            meta = {**meta, "title": meta.get("title") or _guess_title(path, body)}
             return _Document(relative, meta, body)
     raise ValueError(f"document changed while being read: {relative}")
 
@@ -83,8 +87,15 @@ def _load_documents(root: Path) -> tuple[dict[str, Any], list[_Document], list[d
     documents: list[_Document] = []
     issues: list[dict[str, str]] = []
     identities: dict[str, str] = {}
-    # Uses the same directory selection as project governance and team navigation.
-    for path in core.iter_knowledge_files(root):
+    # Read-only scope includes useful README/INDEX content without making it editable.
+    if config.get("profile") == "project" or (not config and not (root / "wiki").exists()):
+        from .documents import document_files_report
+        paths, scan_issues = document_files_report(root, for_retrieval=True)
+        issues.extend({"path": item.get("path", "."), "kind": "skipped", "message": item["message"]}
+                      for item in scan_issues)
+    else:
+        paths = core.iter_knowledge_files(root)
+    for path in paths:
         try:
             document = _read_document(root, path)
         except ValueError as exc:
@@ -183,13 +194,20 @@ def _relation_ids(meta: dict[str, Any]) -> set[str]:
 
 
 def _related(documents: list[_Document], knowledge_id: str, limit: int) -> list[dict[str, Any]]:
-    source = next((document for document in documents if document.id == knowledge_id), None)
+    sources = [document for document in documents if document.id == knowledge_id]
+    if len(sources) > 1:
+        raise ValueError(f"ambiguous knowledge id {knowledge_id}: resolve duplicate IDs before related lookup")
+    source = sources[0] if sources else None
     if source is None:
         return []
     outgoing = _relation_ids(source.meta)
+    counts: dict[str, int] = {}
+    for document in documents:
+        if document.id:
+            counts[document.id] = counts.get(document.id, 0) + 1
     results = []
     for document in documents:
-        if not document.id or document.id == knowledge_id:
+        if not document.id or document.id == knowledge_id or counts[document.id] > 1:
             continue
         relevance = int(document.id in outgoing) + int(knowledge_id in _relation_ids(document.meta))
         if relevance:
@@ -249,5 +267,12 @@ def context_knowledge(root: Path, query: str, limit: int = 5, *,
         return {"direct": [], "related": {}, "issues": []}
     documents, issues = _filtered(root, selected_statuses, scope)
     direct = _search(documents, query, limit)
-    related = {row["id"]: _related(documents, row["id"], 3) for row in direct[:2] if row.get("id")}
+    related = {}
+    for row in direct[:2]:
+        if row.get("id"):
+            try:
+                related[row["id"]] = _related(documents, row["id"], 3)
+            except ValueError:
+                # Duplicate identities remain visible in search, never pick a source silently.
+                related[row["id"]] = []
     return {"direct": direct, "related": related, "issues": issues}

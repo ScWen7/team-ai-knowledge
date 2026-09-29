@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+import yaml
 from pathlib import Path
 
 from . import __version__
@@ -46,6 +47,7 @@ from .intake import apply_disposition, audit_intake, decide_intake, intake_sourc
 from .documents import govern_documents
 from .agent_entry import setup_agent_entry
 from .evaluation import evaluate
+from .connections import connected_query
 from .review import list_reviews, resolve_review, upsert_review
 from .scope import SourceScope, SourceScopeError
 from .status import build_status_report, format_status_report
@@ -76,7 +78,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True, metavar="<command>")
 
     x = sub.add_parser("init", help="创建团队知识库"); x.add_argument("root"); x.add_argument("--repository-id")
-    x = sub.add_parser("status", help="团队库待办视图"); x.add_argument("root"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60); x.add_argument("--review-days", type=int, default=14); x.add_argument("--inbox-limit", type=int, default=3)
+    x = sub.add_parser("status", help="已观测待处理事项，不要求登记或采用记录"); x.add_argument("root"); x.add_argument("--history", action="store_true", help="显式查看时间与旧采用记录线索"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60); x.add_argument("--review-days", type=int, default=14); x.add_argument("--inbox-limit", type=int, default=3)
     x = sub.add_parser("doctor", help="检查知识库结构与健康"); x.add_argument("root"); x.add_argument("--report", choices=["default", "stale"], default="default"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60)
     x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true"); x.add_argument("--connector", default="manual"); x.add_argument("--upstream-id"); x.add_argument("--logical-path")
     x = sub.add_parser("refresh-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("file"); x.add_argument("--owner", default="unassigned")
@@ -102,11 +104,11 @@ def main():
     x = sub.add_parser("adoption-status"); x.add_argument("root"); x.add_argument("knowledge_id")
 
 
-    x = sub.add_parser("project-init", help="接入项目并预览存量文档治理"); x.add_argument("root"); x.add_argument("--project-id", required=True); x.add_argument("--team-repository-id"); x.add_argument("--knowledge-id", action="append"); x.add_argument("--docs", action="append"); x.add_argument("--apply", action="store_true", help="应用可确定的元信息补全并生成导航")
-    x = sub.add_parser("agent-entry", help="预览或写入 AGENTS.md 中的知识库使用约定"); x.add_argument("root"); x.add_argument("--apply", action="store_true")
+    x = sub.add_parser("project-init", help="接入原有资料，不要求先整理元信息"); x.add_argument("root"); x.add_argument("--project-id", required=True); x.add_argument("--team-root", help="本机明确授权的团队库路径，只保存到忽略的 local.yml"); x.add_argument("--team-repository-id"); x.add_argument("--knowledge-id", action="append"); x.add_argument("--docs", action="append"); x.add_argument("--apply", action="store_true", help="应用可确定的元信息补全并生成导航")
+    x = sub.add_parser("agent-entry", help="安装当前 Agent 的知识使用约定"); x.add_argument("root"); x.add_argument("--apply", action="store_true"); x.add_argument("--entry-file", choices=["AGENTS.md", "CLAUDE.md"], default="AGENTS.md")
     x = sub.add_parser("eval", help="用 .knowledge/eval.yml 的真实问题测量检索召回"); x.add_argument("root"); x.add_argument("-k", type=int, default=5)
     x = sub.add_parser("govern", help="预览或应用项目文档治理"); x.add_argument("root"); x.add_argument("--docs", action="append"); x.add_argument("--apply", action="store_true")
-    x = sub.add_parser("project-rules", help="完整读取项目订阅的团队底线，无需创建 Work"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--phase", choices=["start", "release"], default="start")
+    x = sub.add_parser("project-rules", help="完整读取已订阅底线；可从本机路径映射解析团队库"); x.add_argument("root"); x.add_argument("team_root", nargs="?"); x.add_argument("--phase", choices=["start", "release"], default="start")
     x = sub.add_parser("project-lock", help="锁定已订阅底线的发布版本"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("--knowledge-id", action="append")
     x = sub.add_parser("project-status", help="查看底线锁定与更新状态"); x.add_argument("root"); x.add_argument("team_root")
     x = sub.add_parser("project-update", help="接受或延后一条底线更新"); x.add_argument("root"); x.add_argument("team_root"); x.add_argument("knowledge_id"); x.add_argument("--decision", required=True, choices=["accept", "defer"]); x.add_argument("--reason", default="")
@@ -125,9 +127,9 @@ def main():
     x = sub.add_parser("index", help="更新团队库导航；项目库仅检查"); x.add_argument("root")
     x = sub.add_parser("change", help="创建知识变更记录(规则发布链)"); x.add_argument("root"); x.add_argument("title"); x.add_argument("--owner", default="unassigned")
     x = sub.add_parser("prepare"); x.add_argument("root"); x.add_argument("--goal", required=True); x.add_argument("--consumer")
-    x = sub.add_parser("search", help="检索当前工作区文档"); x.add_argument("root"); x.add_argument("query"); x.add_argument("--status", action="append"); x.add_argument("--scope"); x.add_argument("--limit", type=int)
+    x = sub.add_parser("search", help="查找候选资料，随后由当前 Agent 读原文回答"); x.add_argument("root"); x.add_argument("--connected", action="store_true", help="同时查找本机明确接入的库，分库返回"); x.add_argument("query"); x.add_argument("--status", action="append"); x.add_argument("--scope"); x.add_argument("--limit", type=int)
     x = sub.add_parser("related", help="显式引用与反向引用"); x.add_argument("root"); x.add_argument("knowledge_id"); x.add_argument("--limit", type=int, default=5)
-    x = sub.add_parser("context", help="检索计划(直接命中+显式关联)"); x.add_argument("root"); x.add_argument("query"); x.add_argument("--max-context", type=int); x.add_argument("--limit", type=int, default=5); x.add_argument("--status", action="append"); x.add_argument("--scope")
+    x = sub.add_parser("context", help="检索计划(直接命中+显式关联)"); x.add_argument("root"); x.add_argument("--connected", action="store_true"); x.add_argument("query"); x.add_argument("--max-context", type=int); x.add_argument("--limit", type=int, default=5); x.add_argument("--status", action="append"); x.add_argument("--scope")
     x = sub.add_parser("budget"); x.add_argument("--max-context", type=int)
     x = sub.add_parser("adopt"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("knowledge_id"); x.add_argument("--used-for", required=True)
     x = sub.add_parser("evidence"); x.add_argument("root"); x.add_argument("work_id"); x.add_argument("--kind", required=True); x.add_argument("--locator", required=True); x.add_argument("--summary", required=True)
@@ -157,7 +159,7 @@ def main():
                 stale_active_days=a.stale_active_days,
                 draft_days=a.draft_days,
                 review_days=a.review_days,
-                inbox_limit=a.inbox_limit,
+                inbox_limit=a.inbox_limit, include_history=a.history,
             )
             print(format_status_report(report))
             dump({
@@ -231,16 +233,16 @@ def main():
         elif a.cmd == "publication-list": dump(list_publications(root, knowledge_id=a.knowledge_id))
         elif a.cmd == "adoption-status": dump(adoption_status(root, a.knowledge_id))
         elif a.cmd == "project-init":
-            result = init_project(root, project_id=a.project_id, team_repository_id=a.team_repository_id, knowledge_ids=a.knowledge_id, document_paths=a.docs, apply=a.apply)
+            result = init_project(root, project_id=a.project_id, team_repository_id=a.team_repository_id, knowledge_ids=a.knowledge_id, document_paths=a.docs, apply=a.apply, team_root=Path(a.team_root).expanduser() if a.team_root else None)
             dump(result); raise SystemExit(0 if result["ok"] else 1)
-        elif a.cmd == "agent-entry": dump(setup_agent_entry(root, apply=a.apply))
+        elif a.cmd == "agent-entry": dump(setup_agent_entry(root, apply=a.apply, entry_file=a.entry_file))
         elif a.cmd == "eval":
             result = evaluate(root, k=a.k); dump(result); raise SystemExit(0 if not result["failures"] else 1)
         elif a.cmd == "govern":
             result = govern_documents(root, paths=a.docs, apply=a.apply)
             dump(result); raise SystemExit(0 if result["ok"] else 1)
         elif a.cmd == "project-rules":
-            result = project_rules(root, Path(a.team_root).resolve(), phase=a.phase)
+            result = project_rules(root, Path(a.team_root).resolve() if a.team_root else None, phase=a.phase)
             dump(result); raise SystemExit(0 if result["ok"] else 1)
         elif a.cmd == "project-lock":
             print(lock_latest(root, Path(a.team_root).resolve(), knowledge_ids=a.knowledge_id))
@@ -296,12 +298,16 @@ def main():
             print("项目文档检查完成；检索直接读取文件，导航维护请使用 govern。" if project else "Markdown 导航已更新。")
         elif a.cmd == "change": print(create_change(root, a.title, a.owner)); index_workspace(root)
         elif a.cmd == "prepare": print(prepare_work(root, a.goal, consumer_id=a.consumer))
+        elif a.cmd == "search" and a.connected:
+            dump(connected_query(root, a.query, statuses=a.status, scope=a.scope, limit=a.limit if a.limit is not None else 5))
         elif a.cmd == "search":
             results, issues = search_report(root, a.query, statuses=a.status, scope=a.scope, limit=a.limit)
             dump(results)
             for issue in issues:
                 print(f"warning: {issue['path']}: {issue['message']}", file=sys.stderr)
         elif a.cmd == "related": dump(related(root, a.knowledge_id, a.limit))
+        elif a.cmd == "context" and a.connected:
+            dump(connected_query(root, a.query, context=True, statuses=a.status, scope=a.scope, limit=a.limit))
         elif a.cmd == "context": dump(context_plan(root, a.query, a.max_context, a.limit, statuses=a.status, scope=a.scope))
         elif a.cmd == "adopt": dump(adopt_knowledge(root, a.work_id, a.knowledge_id, a.used_for))
         elif a.cmd == "evidence": print(record_evidence(root, a.work_id, a.kind, a.locator, a.summary))
@@ -323,7 +329,7 @@ def main():
                 print(content, end="")
         elif a.cmd == "scope-search":
             with SourceScope(root, a.wiki_root) as scope: dump(scope.search(a.pattern, limit=a.limit))
-    except (KeyError, ValueError, SourceScopeError) as exc:
+    except (KeyError, ValueError, OSError, yaml.YAMLError, SourceScopeError) as exc:
         p.error(str(exc))
 
 

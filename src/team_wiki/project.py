@@ -103,13 +103,15 @@ def init_project(
     knowledge_ids: list[str] | None = None,
     document_paths: list[str] | None = None,
     apply: bool = False,
+    team_root: Path | None = None,
 ) -> dict[str, Any]:
     """Connect existing documents without replacing project-owned structures.
 
     Initialization writes tool configuration; document content changes require
     apply=True. Existing version-consumption calls remain valid.
     """
-    from .documents import govern_documents
+    from .documents import govern_documents, _scope_entries
+    from .connections import connection_update
     ids = list(dict.fromkeys(str(x).strip() for x in (knowledge_ids or []) if str(x).strip()))
     if not project_id.strip():
         raise ValueError("project_id is required")
@@ -135,7 +137,22 @@ def init_project(
             raise ValueError("existing baseline subscription differs; edit the project configuration explicitly")
         sources = requested
 
-    report = govern_documents(root, paths=document_paths, apply=False, repository_id=project_id)
+    # First value is reading the existing documents, not a metadata cleanup assignment.
+    connection = connection_update(root, team_root) if team_root is not None else None
+    if team_root is not None and team_repository_id:
+        from .connections import repository_identity
+        if repository_identity(team_root) != team_repository_id:
+            raise ValueError("connected team repository differs from baseline subscription")
+    if apply:
+        report = govern_documents(root, paths=document_paths, apply=False, repository_id=project_id)
+    else:
+        entries, issues = _scope_entries(root, document_paths, config_data=existing or None)
+        report = {"ok": not any(x.get("blocking") for x in issues),
+                  "document_paths": [rel for rel, _ in entries], "changed_paths": [],
+                  "errors": [x["message"] for x in issues if x.get("blocking")],
+                  "warnings": [x["message"] for x in issues if not x.get("blocking")],
+                  "issues": issues, "applied": False,
+                  "note": "仅接入读取范围；没有修改正文、补齐元信息或确认有效性。"}
     if not report["ok"]:
         return report
     config = {**existing, "version": 1, "repository_id": project_id,
@@ -144,9 +161,7 @@ def init_project(
     if config != existing:
         write_yaml(config_path, config)
 
-    (root / ".knowledge/cache").mkdir(parents=True, exist_ok=True)
     if sources:
-        (root / ".knowledge/records/update-decisions").mkdir(parents=True, exist_ok=True)
         if not _lock_path(root).exists():
             write_yaml(_lock_path(root), {"version": 1, "project_id": project_id,
                        "source_repository_id": sources[0]["repository_id"],
@@ -159,6 +174,10 @@ def init_project(
     if missing:
         gitignore.write_text(ignored + ("\n" if ignored and not ignored.endswith("\n") else "")
                              + "\n".join(missing) + "\n", encoding="utf-8")
+    if connection is not None:
+        local_path, local_data = connection
+        if not local_path.exists() or read_yaml(local_path) != local_data:
+            write_yaml(local_path, local_data)
     if apply:
         report = govern_documents(root, paths=report["document_paths"], apply=True, repository_id=project_id)
     report["initialized"] = True
@@ -623,8 +642,11 @@ def _git_show(team_root: Path, commit: str, path: str) -> bytes:
     return cp.stdout
 
 
-def project_rules(project_root: Path, team_root: Path, *, phase: str = "start") -> dict[str, Any]:
+def project_rules(project_root: Path, team_root: Path | None = None, *, phase: str = "start") -> dict[str, Any]:
     """Read every subscribed baseline from the lock without creating a Work."""
+    if team_root is None:
+        from .connections import team_path
+        team_root = team_path(project_root, str(_source_config(project_root)["repository_id"]))
     source = _verify_team_source(project_root, team_root)
     lock_sha = _canonical_lock_sha(project_root)
     gate = project_gate(project_root, team_root, phase=phase)

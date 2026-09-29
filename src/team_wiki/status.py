@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import iter_changes, parse_frontmatter, utc_now
-from .stale import _age_days, _parse_iso, build_stale_report
+from .stale import _age_days, _parse_iso, build_stale_report, StaleReport
 
 
 SEVERITIES = ("blocking", "attention")
@@ -192,15 +192,14 @@ def _inbox_backlog(root: Path, limit: int) -> list[Decision]:
         Decision(
             kind="inbox-backlog",
             severity="attention",
-            title=f"{len(pending)} 份资料已投递但未登记",
+            title=f"{len(pending)} 份投递资料可按需浏览",
             detail=(
-                "sources/inbox/ 中的文件不会自动成为知识。需要执行 ingest 登记为稳定 source。"
+                "先判断资料用途与是否已有对应结论；Agent 可读取资料并准备原文的最小补充。"
+                "附件可保留为参考，不要求逐份登记或全部转成正式知识；提交不等于已审核。"
             ),
             subject={"count": len(pending), "files": [p.name for p in pending[:10]]},
             actions=[
-                f'team-wiki ingest . sources/inbox/{pending[0].name} --title "<标题>"',
-                "team-wiki intake-source . <source-id>",
-                "team-wiki intake-decide . <intake-id> --keep-evidence <evidence-id>",
+                "请当前 Agent 阅读投递资料、核对来源和已有知识，准备必要修改；由现有责任人确认。",
             ],
         )
     ]
@@ -226,7 +225,6 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
                     "age_days": row["age_days"],
                 },
                 actions=[
-                    f"team-wiki adoption-status . {kid}",
                     f"team-wiki search . \"{kid}\"",
                 ],
             )
@@ -248,7 +246,6 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
                     "age_days": row["age_days"],
                 },
                 actions=[
-                    f"team-wiki evidence-bindings . --target-id {kid}",
                     f"team-wiki search . \"{kid}\"",
                 ],
             )
@@ -270,7 +267,6 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
                     "age_days": row["age_days"],
                 },
                 actions=[
-                    f"team-wiki evidence-bindings . --target-id {kid}",
                     f"team-wiki search . \"{kid}\"",
                 ],
             )
@@ -287,15 +283,17 @@ def build_status_report(
     draft_days: int = 60,
     review_days: int = 14,
     inbox_limit: int = 3,
+    include_history: bool = False,
 ) -> StatusReport:
     """Collect every decision the current maintainer actually has to make."""
     now = now or datetime.now(timezone.utc)
     stale = build_stale_report(
         root,
+        now=now,
         zero_adoption_days=zero_adoption_days,
         stale_active_days=stale_active_days,
         draft_days=draft_days,
-    )
+    ) if include_history else StaleReport()
     report = StatusReport(
         decisions=[
             *_blocked_publishes(root),
@@ -321,13 +319,13 @@ _KIND_LABELS = {
     "zero-adoption": "发布后未记录到采用",
     "stale-knowledge": "知识修改时间较久",
     "long-draft": "draft 超过观察期",
-    "inbox-backlog": "资料积压未登记",
+    "inbox-backlog": "投递资料待浏览",
 }
 
 
 def format_status_report(report: StatusReport) -> str:
     if not report.decisions:
-        return "✅ 没有需要你决策的事项。"
+        return "没有需要你决策的已观测事项；不代表内容已验证。结构检查用 doctor，历史时间线索用 status --history。"
 
     lines = ["# 待决策事项", ""]
     blocking = report.blocking
