@@ -12,9 +12,9 @@ Each item is one of:
 
 - ``blocked-publish``  a change cannot be published until its Reviews close
 - ``stale-review``     a Review has been open long enough to stall a release
-- ``zero-adoption``    a Publication shipped but no Work ever adopted it
-- ``stale-knowledge``  an ``active`` entry nobody has touched in a long time
-- ``long-draft``       a ``draft`` that never reached review
+- ``zero-adoption``    no Adoption record was found for a Publication in the observation window
+- ``stale-knowledge``  an ``active`` entry has an old recorded modification time
+- ``long-draft``       a ``draft`` has an old recorded modification time
 - ``inbox-backlog``    material was submitted but never registered
 """
 from __future__ import annotations
@@ -214,10 +214,11 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
             Decision(
                 kind="zero-adoption",
                 severity="attention",
-                title=f"{kid} @ {row['publication_id']} 发布后无人使用",
+                title=f"{kid} @ {row['publication_id']} 未记录到采用",
                 detail=(
-                    f"发布于 {row['published_at']}（{row['age_days']} 天前），"
-                    "没有任何 Work 采用过这个版本。可能是知识没必要，也可能是没人找得到。"
+                    f"发布于 {row['published_at']}（{row['age_days']} 天前）。"
+                    "当前记录中没有该版本的 Adoption；这不代表没有实际使用。"
+                    "可核对知识来源、项目记录和查找路径。"
                 ),
                 subject={
                     "knowledge_id": kid,
@@ -236,10 +237,10 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
             Decision(
                 kind="stale-knowledge",
                 severity="attention",
-                title=f"{kid} 仍是 active 但 {row['age_days']} 天未更新",
+                title=f"{kid} 距最近可用修改时间 {row['age_days']} 天",
                 detail=(
-                    f"最后更新于 {row['last_touched']}。规则可能已经和现实脱节，"
-                    "建议由 owner 确认是否仍成立。"
+                    f"最近可用修改时间为 {row['last_touched']}。"
+                    "时间较久只是复核线索，不能据此判定知识失效。"
                 ),
                 subject={
                     "knowledge_id": kid,
@@ -247,9 +248,8 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
                     "age_days": row["age_days"],
                 },
                 actions=[
-                    "team-wiki evidence-show . <evidence-id>  # 复核支撑证据",
-                    f"team-wiki patch-plan-direct . --knowledge {kid} --comparison narrows "
-                    "--statement \"<结论>\" --evidence <evidence-id> --summary \"<摘要>\"",
+                    f"team-wiki evidence-bindings . --target-id {kid}",
+                    f"team-wiki search . \"{kid}\"",
                 ],
             )
         )
@@ -259,10 +259,10 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
             Decision(
                 kind="long-draft",
                 severity="attention",
-                title=f"{kid} 停留在 draft 超过 {row['age_days']} 天",
+                title=f"{kid} 仍为 draft，已超过观察期 {row['age_days']} 天",
                 detail=(
-                    f"创建于 {row['last_touched']}，一直没有进入发布流程。"
-                    "要么推进审核，要么明确废弃，避免它被误当作正式知识。"
+                    f"最近可用修改时间为 {row['last_touched']}。"
+                    "这只是状态和时间线索，建议先核对来源、结论和当前需求。"
                 ),
                 subject={
                     "knowledge_id": kid,
@@ -270,9 +270,8 @@ def _stale_decisions(root: Path, report: Any) -> list[Decision]:
                     "age_days": row["age_days"],
                 },
                 actions=[
-                    f"team-wiki patch-plan-direct . --knowledge {kid} --comparison adds "
-                    f"--statement \"<结论>\" --evidence <evidence-id> --summary \"<摘要>\"",
-                    f"# 或直接废弃：把 {row['path']} 的 status 改为 deprecated",
+                    f"team-wiki evidence-bindings . --target-id {kid}",
+                    f"team-wiki search . \"{kid}\"",
                 ],
             )
         )
@@ -319,9 +318,9 @@ def build_status_report(
 _KIND_LABELS = {
     "blocked-publish": "发布被阻塞",
     "stale-review": "Review 长期未处理",
-    "zero-adoption": "发布后无人使用",
-    "stale-knowledge": "active 知识长期未更新",
-    "long-draft": "draft 长期未推进",
+    "zero-adoption": "发布后未记录到采用",
+    "stale-knowledge": "知识修改时间较久",
+    "long-draft": "draft 超过观察期",
     "inbox-backlog": "资料积压未登记",
 }
 

@@ -19,6 +19,7 @@ import yaml
 from team_wiki.core import _rewrite_change_meta, create_change, init_team, parse_frontmatter
 from team_wiki.review import resolve_review, upsert_review
 from team_wiki.status import build_status_report, format_status_report
+from team_wiki.stale import build_stale_report, format_stale_report
 
 
 def _age_file(path: Path, key: str, days: int) -> str:
@@ -221,7 +222,9 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
             self.assertIsNotNone(item)
             self.assertEqual(item.severity, "attention")
             self.assertIn("K-OLD", item.title)
-            self.assertTrue(any("patch-plan-direct" in a for a in item.actions))
+            self.assertIn("复核线索", item.detail)
+            self.assertTrue(any("evidence-bindings" in a for a in item.actions))
+            self.assertFalse(any("--comparison narrows" in a for a in item.actions))
 
     def test_long_draft_is_reported(self):
         with TemporaryDirectory() as td:
@@ -233,7 +236,10 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
 
             self.assertIsNotNone(item)
             self.assertIn("K-DRAFT", item.title)
-            self.assertTrue(any("deprecated" in a for a in item.actions))
+            self.assertIn("核对来源", item.detail)
+            self.assertTrue(any("evidence-bindings" in a for a in item.actions))
+            self.assertFalse(any("--comparison adds" in a for a in item.actions))
+            self.assertFalse(any("deprecated" in a for a in item.actions))
 
     def test_zero_adoption_publication_is_reported(self):
         with TemporaryDirectory() as td:
@@ -269,7 +275,14 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
 
             self.assertIsNotNone(item)
             self.assertIn("K-PUB", item.title)
+            self.assertNotIn("无人使用", item.title + item.detail)
+            self.assertIn("不代表没有实际使用", item.detail)
             self.assertTrue(any("adoption-status" in a for a in item.actions))
+            stale_text = format_stale_report(
+                build_stale_report(root, now=datetime.now(timezone.utc))
+            )
+            self.assertIn("不等于没有实际使用", stale_text)
+            self.assertNotIn("标记 deprecated", stale_text)
 
     # --- inbox backlog ---
 

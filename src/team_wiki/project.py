@@ -19,6 +19,7 @@ from .core import ALLOWED_OUTCOMES, KIT_VERSION, git_info, read_yaml, short_hash
 from .publication import (
     latest_publication_for,
     list_publications,
+    publication_path,
     record_work_adoptions,
 )
 
@@ -98,71 +99,71 @@ def init_project(
     root: Path,
     *,
     project_id: str,
-    team_repository_id: str,
-    knowledge_ids: list[str],
-) -> None:
-    ids = list(dict.fromkeys(str(x).strip() for x in knowledge_ids if str(x).strip()))
-    if not ids:
-        raise ValueError("at least one knowledge_id is required")
+    team_repository_id: str | None = None,
+    knowledge_ids: list[str] | None = None,
+    document_paths: list[str] | None = None,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Connect existing documents without replacing project-owned structures.
 
-    (root / ".knowledge/records/update-decisions").mkdir(parents=True, exist_ok=True)
-    (root / ".knowledge/runs").mkdir(parents=True, exist_ok=True)
-    (root / ".knowledge/cache").mkdir(parents=True, exist_ok=True)
-
+    Initialization writes tool configuration; document content changes require
+    apply=True. Existing version-consumption calls remain valid.
+    """
+    from .documents import govern_documents
+    ids = list(dict.fromkeys(str(x).strip() for x in (knowledge_ids or []) if str(x).strip()))
+    if not project_id.strip():
+        raise ValueError("project_id is required")
+    if bool(team_repository_id) != bool(ids):
+        raise ValueError("team_repository_id and at least one knowledge_id must be supplied together")
+    root = root.resolve()
+    for rel in (".knowledge", ".knowledge/config.yml", ".knowledge/cache", ".gitignore"):
+        if (root / rel).is_symlink():
+            raise ValueError(f"initialization refuses a symlink at {rel}")
+    root.mkdir(parents=True, exist_ok=True)
     config_path = _config_path(root)
-    if config_path.exists():
-        existing = read_yaml(config_path)
-        if existing.get("profile") != "project":
-            raise ValueError("existing .knowledge/config.yml is not a project profile")
-        if existing.get("repository_id") != project_id:
-            raise ValueError("existing project repository_id differs from requested project_id")
-    else:
-        write_yaml(
-            config_path,
-            {
-                "version": 1,
-                "repository_id": project_id,
-                "profile": "project",
-                "language": "zh-CN",
-                "knowledge_sources": [
-                    {
-                        "repository_id": team_repository_id,
-                        "knowledge_ids": ids,
-                    }
-                ],
-            },
-        )
+    existing = read_yaml(config_path) if config_path.exists() else {}
+    if existing and existing.get("version", 1) != 1:
+        raise ValueError("unsupported project config version; initialization does not migrate or downgrade schemas")
+    if existing and existing.get("profile") != "project":
+        raise ValueError("existing .knowledge/config.yml is not a project profile")
+    if existing and existing.get("repository_id") != project_id:
+        raise ValueError("existing project repository_id differs from requested project_id")
+    sources = existing.get("knowledge_sources") or []
+    if team_repository_id:
+        requested = [{"repository_id": team_repository_id, "knowledge_ids": ids}]
+        if sources and sources != requested:
+            raise ValueError("existing baseline subscription differs; edit the project configuration explicitly")
+        sources = requested
 
-    lock_path = _lock_path(root)
-    if not lock_path.exists():
-        write_yaml(
-            lock_path,
-            {
-                "version": 1,
-                "project_id": project_id,
-                "source_repository_id": team_repository_id,
-                "updated_at": utc_now(),
-                "entries": {},
-            },
-        )
+    report = govern_documents(root, paths=document_paths, apply=False, repository_id=project_id)
+    if not report["ok"]:
+        return report
+    config = {**existing, "version": 1, "repository_id": project_id,
+              "profile": "project", "language": existing.get("language", "zh-CN"),
+              "knowledge_sources": sources, "document_paths": report["document_paths"]}
+    if config != existing:
+        write_yaml(config_path, config)
 
-    local = root / ".knowledge/local.yml"
-    if not local.exists():
-        local.write_text(
-            "# 本机路径映射；不要提交\nrepositories: {}\n",
-            encoding="utf-8",
-        )
+    (root / ".knowledge/cache").mkdir(parents=True, exist_ok=True)
+    if sources:
+        (root / ".knowledge/records/update-decisions").mkdir(parents=True, exist_ok=True)
+        if not _lock_path(root).exists():
+            write_yaml(_lock_path(root), {"version": 1, "project_id": project_id,
+                       "source_repository_id": sources[0]["repository_id"],
+                       "updated_at": utc_now(), "entries": {}})
 
     gitignore = root / ".gitignore"
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    ignored = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
     needed = [".knowledge/local.yml", ".knowledge/runs/", ".knowledge/cache/"]
-    missing = [x for x in needed if x not in existing.splitlines()]
+    missing = [x for x in needed if x not in ignored.splitlines()]
     if missing:
-        text = existing
-        if text and not text.endswith("\n"):
-            text += "\n"
-        text += "\n".join(missing) + "\n"
-        gitignore.write_text(text, encoding="utf-8")
+        gitignore.write_text(ignored + ("\n" if ignored and not ignored.endswith("\n") else "")
+                             + "\n".join(missing) + "\n", encoding="utf-8")
+    if apply:
+        report = govern_documents(root, paths=report["document_paths"], apply=True, repository_id=project_id)
+    report["initialized"] = True
+    report["project_id"] = project_id
+    return report
 
 
 def _verify_team_source(project_root: Path, team_root: Path) -> dict[str, Any]:
@@ -561,6 +562,7 @@ def handle_update(
         "decided_at": utc_now(),
         "new_lock_sha256": _canonical_lock_sha(project_root),
     }
+    # The reason is not encoded in the lock; retain the existing decision record.
     write_yaml(_decision_path(project_root, did), record)
     return record
 
@@ -621,6 +623,46 @@ def _git_show(team_root: Path, commit: str, path: str) -> bytes:
     return cp.stdout
 
 
+def project_rules(project_root: Path, team_root: Path, *, phase: str = "start") -> dict[str, Any]:
+    """Read every subscribed baseline from the lock without creating a Work."""
+    source = _verify_team_source(project_root, team_root)
+    lock_sha = _canonical_lock_sha(project_root)
+    gate = project_gate(project_root, team_root, phase=phase)
+    if not gate["ok"]:
+        return {"ok": False, "rules": [], "gate": gate, "complete": False}
+    lock = read_yaml(_lock_path(project_root))
+    entries = lock.get("entries") or {}
+    rules = []
+    for kid in source["knowledge_ids"]:
+        entry = entries.get(kid)
+        if entry is None:
+            raise ValueError(f"required knowledge is not locked: {kid}")
+        rules.append(_read_locked_knowledge(team_root, kid, entry))
+    if _canonical_lock_sha(project_root) != lock_sha:
+        raise ValueError("knowledge.lock changed while reading required rules; retry with one snapshot")
+    return {"ok": True, "rules": rules, "gate": gate, "complete": True,
+            "knowledge_lock_sha256": lock_sha,
+            "note": "已完整读取订阅底线；不代表已执行检查、通过审批或完成交付。"}
+
+
+def _read_locked_knowledge(team_root: Path, knowledge_id: str,
+                           entry: dict[str, Any]) -> dict[str, Any]:
+    publication = read_yaml(publication_path(team_root, str(entry["publication_id"])))
+    if publication.get("publication_id") != entry.get("publication_id") or publication.get("knowledge_id") != knowledge_id or any(
+        publication.get(key) != entry.get(key)
+        for key in ("published_ref", "path", "content_sha256", "adoption_requirement")
+    ):
+        raise ValueError(f"locked Publication identity mismatch for {knowledge_id}")
+    data = _git_show(team_root, str(entry["published_ref"]), str(entry["path"]))
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != entry.get("content_sha256"):
+        raise ValueError(f"locked Publication content hash mismatch for {knowledge_id}")
+    return {"knowledge_id": knowledge_id, "publication_id": entry["publication_id"],
+            "published_ref": entry["published_ref"], "content_sha256": digest,
+            "adoption_requirement": entry.get("adoption_requirement"),
+            "path": entry["path"], "content": data.decode("utf-8")}
+
+
 def project_context(
     project_root: Path,
     team_root: Path,
@@ -635,26 +677,7 @@ def project_context(
         raise ValueError(
             f"knowledge {knowledge_id} was not locked when {work_id} started"
         )
-    data = _git_show(
-        team_root,
-        str(entry["published_ref"]),
-        str(entry["path"]),
-    )
-    digest = hashlib.sha256(data).hexdigest()
-    if digest != entry.get("content_sha256"):
-        raise ValueError(
-            f"locked Publication content hash mismatch for {knowledge_id}"
-        )
-    return {
-        "work_id": work_id,
-        "knowledge_id": knowledge_id,
-        "publication_id": entry["publication_id"],
-        "published_ref": entry["published_ref"],
-        "content_sha256": digest,
-        "adoption_requirement": entry.get("adoption_requirement"),
-        "path": entry["path"],
-        "content": data.decode("utf-8"),
-    }
+    return {"work_id": work_id, **_read_locked_knowledge(team_root, knowledge_id, entry)}
 
 
 def project_adopt(
@@ -856,4 +879,3 @@ def run_project_work(
         "observations": observed,
         "finalized": finalized,
     }
-

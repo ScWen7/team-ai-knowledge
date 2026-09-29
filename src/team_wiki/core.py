@@ -11,8 +11,7 @@ from typing import Any
 
 import yaml
 
-KIT_VERSION = "0.8.0"
-FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
+KIT_VERSION = "0.9.0"
 
 
 def utc_now() -> str:
@@ -29,7 +28,12 @@ def slugify(value: str) -> str:
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML must be a mapping: {path}")
+    return data
 
 
 def write_yaml(path: Path, data: dict[str, Any]) -> None:
@@ -38,11 +42,8 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
 
 
 def parse_frontmatter(path: Path) -> tuple[dict[str, Any], str]:
-    text = path.read_text(encoding="utf-8")
-    match = FRONTMATTER_RE.match(text)
-    if not match:
-        return {}, text
-    return yaml.safe_load(match.group(1)) or {}, text[match.end():]
+    from .documents import read_document
+    return read_document(path)
 
 
 def ensure_file(path: Path, content: str) -> None:
@@ -81,7 +82,6 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
         ".knowledge/records",
         ".knowledge/runs",
         ".knowledge/cache",
-        ".agents/skills/team-wiki",
     ]:
         (root / rel).mkdir(parents=True, exist_ok=True)
 
@@ -100,7 +100,7 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
         root / "AGENTS.md",
         """# Team knowledge workflow
 
-先准备知识依据，按需读取；只有真正影响产出的知识才记录为 adopted；持久新证据进入知识变更；不得把搜索命中当作采用，也不得把未执行检查写成通过。
+按任务使用 `team-wiki search` 查找知识，核对状态、适用范围和来源后读取正文。未找到时明确说明限制。项目共同底线使用 `team-wiki project-rules` 完整读取，不以检索排名替代。新事实和经验写入所属项目或团队知识库，按既有审核渠道确认；不得把格式通过、搜索命中或采用记录当成业务验证。Work 追溯仅在明确需要时使用。
 """,
     )
     ensure_file(
@@ -116,7 +116,7 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
 - 不自动收录个人偏好、密钥和未经授权的受限资料。
 """,
     )
-    ensure_file(root / "wiki/OVERVIEW.md", "# Overview\n\n当前为 V0.1 空知识库，尚无已确认领域认识。\n")
+    ensure_file(root / "wiki/OVERVIEW.md", "# Overview\n\n尚无已确认领域认识；按实际维护的知识更新本页。\n")
     ensure_file(root / "wiki/INDEX.md", "# Wiki Index\n\n> 由 `team-wiki index` 更新。\n")
     for rel, title in [
         ("team-conventions", "团队约定"),
@@ -127,7 +127,7 @@ def init_team(root: Path, repository_id: str | None = None) -> None:
         ensure_file(root / "wiki" / rel / "INDEX.md", f"# {title}\n\n暂无条目。\n")
     ensure_file(root / "sources/INDEX.md", "# Sources Index\n\n> 由 `team-wiki index` 更新。\n")
     ensure_file(root / "changes/INDEX.md", "# Changes Index\n\n> 由 `team-wiki index` 更新。\n")
-    ensure_file(root / "changes/reviews/INDEX.md", "# Reviews Index\\n\\n> 由 `team-wiki index` 更新。\\n")
+    ensure_file(root / "changes/reviews/INDEX.md", "# Reviews Index\n\n> 由 `team-wiki index` 更新。\n")
     for name, title in [
         ("open.md", "Open Changes"),
         ("blocked.md", "Blocked Changes"),
@@ -237,11 +237,17 @@ def register_source(
 
 
 def iter_knowledge_files(root: Path) -> list[Path]:
+    config_path = root / ".knowledge/config.yml"
+    if config_path.is_file() and read_yaml(config_path).get("profile") == "project":
+        from .documents import iter_document_files
+        return iter_document_files(root)
     base = root / "wiki"
     if not base.exists():
         return []
     skip = {"INDEX.md", "PURPOSE.md", "OVERVIEW.md"}
-    return [p for p in base.rglob("*.md") if p.name not in skip]
+    return sorted(p for p in base.rglob("*.md") if p.name not in skip
+                  and not p.is_symlink() and p.resolve().is_relative_to(root.resolve())
+                  and not any(part.startswith(".") for part in p.relative_to(base).parts))
 
 
 def iter_changes(root: Path) -> list[Path]:
@@ -250,6 +256,15 @@ def iter_changes(root: Path) -> list[Path]:
 
 
 def index_workspace(root: Path) -> None:
+    config_path = root / ".knowledge/config.yml"
+    if config_path.is_file() and read_yaml(config_path).get("profile") == "project":
+        # File search needs no index build. Check the existing project scope
+        # without replacing its navigation or adding metadata to its documents.
+        from .documents import govern_documents
+        report = govern_documents(root)
+        if not report["ok"]:
+            raise ValueError("; ".join(report["errors"]))
+        return
     lines = ["# Wiki Index", "", "> 正式知识导航；正文是否正式以当前发布分支/快照为准。", ""]
     for rel, label in [
         ("team-conventions", "团队约定"),
@@ -354,7 +369,7 @@ def index_workspace(root: Path) -> None:
                 f"— `{item['state']}` — {item.get('owner') or 'unassigned'}"
             )
         (root / "changes/reviews/INDEX.md").write_text(
-            "# Reviews Index\\n\\n" + ("\\n".join(review_rows) if review_rows else "暂无 Review。") + "\\n",
+            "# Reviews Index\n\n" + ("\n".join(review_rows) if review_rows else "暂无 Review。") + "\n",
             encoding="utf-8",
         )
     except Exception:
@@ -477,45 +492,19 @@ def _knowledge_fields(meta: dict[str, Any], body: str) -> dict[str, str]:
     }
 
 
-def search(root: Path, query: str) -> list[dict[str, Any]]:
-    """Rank knowledge entries against a free-form query.
+def search(root: Path, query: str, *, statuses: list[str] | None = None,
+           scope: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    """Explore documents with explicit status; required rules use project-rules."""
+    from .retrieval import search_knowledge
+    return search_knowledge(root, query, statuses=statuses, scope=scope, limit=limit)
 
-    Works for Chinese without a tokenizer: CJK runs are expanded into
-    character n-grams, so a natural-language question matches knowledge whose
-    wording differs but whose characters overlap. Latin identifiers still
-    match exactly. Field-weighted so a title hit outranks a body mention.
-    """
-    terms = tokenize_query(query)
-    if not terms:
-        return []
-    results = []
-    for path in iter_knowledge_files(root):
-        meta, body = parse_frontmatter(path)
-        fields = {k: v.lower() for k, v in _knowledge_fields(meta, body).items()}
-        score = 0
-        for term in terms:
-            weight = FIELD_WEIGHTS["body"]
-            if term in fields["title"]:
-                weight = FIELD_WEIGHTS["title"]
-            elif term in fields["tags"]:
-                weight = FIELD_WEIGHTS["tags"]
-            elif term in fields["summary"]:
-                weight = FIELD_WEIGHTS["summary"]
-            hits = sum(fields[k].count(term) for k in fields)
-            if hits:
-                # Longer n-grams are stronger evidence than their sub-bigrams.
-                score += hits * weight * len(term)
-        if score:
-            results.append(
-                {
-                    "score": score,
-                    "id": meta.get("id"),
-                    "title": meta.get("title") or path.stem,
-                    "status": meta.get("status", "unclassified"),
-                    "path": str(path.relative_to(root)),
-                }
-            )
-    return sorted(results, key=lambda x: (-x["score"], x["path"]))
+
+def search_report(root: Path, query: str, *, statuses: list[str] | None = None,
+                  scope: str | None = None, limit: int | None = None
+                  ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Like search, but also returns files skipped as unreadable or ambiguous."""
+    from .retrieval import search_knowledge_report
+    return search_knowledge_report(root, query, statuses=statuses, scope=scope, limit=limit)
 
 
 @dataclass
@@ -527,6 +516,18 @@ class CheckResult:
 
 def doctor(root: Path) -> CheckResult:
     errors, warnings = [], []
+    config_path = root / ".knowledge/config.yml"
+    if config_path.is_file():
+        try:
+            config = read_yaml(config_path)
+            if config.get("profile") == "project":
+                from .documents import govern_documents
+                report = govern_documents(root)
+                if not config.get("repository_id"):
+                    report["errors"].append("config repository_id is required")
+                return CheckResult(not report["errors"], report["errors"], report["warnings"])
+        except (ValueError, yaml.YAMLError) as exc:
+            return CheckResult(False, [str(exc)], [])
     for rel in [
         "README.md",
         "sources/INDEX.md",
@@ -560,7 +561,7 @@ def doctor(root: Path) -> CheckResult:
             warnings.append(f"knowledge file without frontmatter: {path.relative_to(root)}")
             continue
         kid = meta.get("id")
-        if not kid:
+        if not isinstance(kid, str) or not kid.strip():
             errors.append(f"knowledge file missing id: {path.relative_to(root)}")
         elif kid in ids:
             errors.append(
@@ -611,12 +612,6 @@ def doctor(root: Path) -> CheckResult:
     if inbox.exists() and len([p for p in inbox.iterdir() if p.is_file()]) > 20:
         warnings.append("inbox backlog exceeds 20 files")
     try:
-        from .node_core import available as node_core_available
-        if not node_core_available():
-            warnings.append("Node.js knowledge-core unavailable: relation/context-budget features are disabled")
-    except Exception as exc:
-        warnings.append(f"cannot inspect Node.js knowledge-core: {exc}")
-    try:
         from .review import list_reviews
         for item in list_reviews(root):
             if item.get("state") not in {"open", "in-progress", "blocked", "resolved", "dismissed"}:
@@ -637,86 +632,37 @@ def knowledge_ref(root: Path, knowledge_id: str) -> tuple[Path, dict[str, Any], 
     raise KeyError(f"knowledge id not found: {knowledge_id}")
 
 
-def build_relationship_nodes(root: Path) -> list[dict[str, Any]]:
-    nodes: list[dict[str, Any]] = []
-    raw_out: dict[str, set[str]] = {}
-    metas: dict[str, dict[str, Any]] = {}
-    paths: dict[str, Path] = {}
-    for path in iter_knowledge_files(root):
-        meta, _ = parse_frontmatter(path)
-        kid = meta.get("id")
-        if not kid:
-            continue
-        kid = str(kid)
-        metas[kid] = meta
-        paths[kid] = path
-        links: set[str] = set()
-        for item in meta.get("related", []) or []:
-            if isinstance(item, str):
-                links.add(item)
-            elif isinstance(item, dict) and item.get("id"):
-                links.add(str(item["id"]))
-        for item in meta.get("references", []) or []:
-            if isinstance(item, dict) and item.get("id") and item.get("relation") in {"related", "related_to", "depends_on", "supersedes"}:
-                links.add(str(item["id"]))
-        raw_out[kid] = links
-
-    incoming: dict[str, set[str]] = {kid: set() for kid in metas}
-    for src, targets in raw_out.items():
-        for target in targets:
-            if target in incoming and target != src:
-                incoming[target].add(src)
-
-    for kid, meta in metas.items():
-        sources: list[str] = []
-        for item in meta.get("source_paths", []) or []:
-            sources.append(str(item))
-        for item in meta.get("evidence", []) or []:
-            if isinstance(item, str):
-                sources.append(item)
-            elif isinstance(item, dict):
-                sid = item.get("source_id") or item.get("id")
-                if sid:
-                    sources.append(str(sid))
-        nodes.append({
-            "id": kid,
-            "title": meta.get("title") or paths[kid].stem,
-            "type": str(meta.get("type", "other")),
-            "path": str(paths[kid].relative_to(root)),
-            "sources": sorted(set(sources)),
-            "outLinks": sorted(t for t in raw_out.get(kid, set()) if t in metas and t != kid),
-            "inLinks": sorted(incoming.get(kid, set())),
-        })
-    return nodes
+def related(root: Path, knowledge_id: str, limit: int = 5, *,
+            statuses: list[str] | None = None, scope: str | None = None) -> list[dict[str, Any]]:
+    """Return current explicit links and reverse links, without inferred affinity."""
+    from .retrieval import related_knowledge
+    return related_knowledge(root, knowledge_id, limit, statuses=statuses, scope=scope)
 
 
-def related(root: Path, knowledge_id: str, limit: int = 5) -> list[dict[str, Any]]:
-    from .node_core import related_nodes
-    rows = related_nodes(knowledge_id, build_relationship_nodes(root), limit)
-    return [
-        {
-            "id": row["node"]["id"],
-            "title": row["node"]["title"],
-            "path": row["node"]["path"],
-            "relevance": row["relevance"],
-        }
-        for row in rows
-    ]
+def context_budget(max_context_size: int | None) -> dict[str, Any]:
+    """Legacy character-budget estimate; does not inspect or truncate a session."""
+    size = max_context_size if max_context_size is not None else 204800
+    if size <= 0:
+        raise ValueError("max context size must be positive")
+    pages = int(size * 0.5)
+    return {"maxCtx": size, "responseReserve": int(size * 0.15),
+            "indexBudget": int(size * 0.05), "pageBudget": pages,
+            "maxPageSize": min(pages, max(5000, int(pages * 0.3))),
+            "unit": "characters", "applied": False}
 
 
-def context_plan(root: Path, query: str, max_context_size: int | None = None, limit: int = 5) -> dict[str, Any]:
-    from .node_core import context_budget
-    direct = search(root, query)[:limit]
-    related_rows: dict[str, list[dict[str, Any]]] = {}
-    for row in direct[:2]:
-        if row.get("id"):
-            related_rows[str(row["id"])] = related(root, str(row["id"]), limit=3)
+def context_plan(root: Path, query: str, max_context_size: int | None = None,
+                 limit: int = 5, *, statuses: list[str] | None = None,
+                 scope: str | None = None) -> dict[str, Any]:
+    from .retrieval import context_knowledge
+    plan = context_knowledge(root, query, limit, statuses=statuses, scope=scope)
     return {
         "budget": context_budget(max_context_size),
-        "direct": direct,
-        "related": related_rows,
+        "direct": plan["direct"],
+        "related": plan["related"],
+        "issues": plan["issues"],
         "complete": False,
-        "note": "V0.2 returns a retrieval plan; the current Agent decides what to read and cite.",
+        "note": "检索计划尚未读取或裁切正文；状态不代表审批。项目共同底线请使用 project-rules 完整读取。",
     }
 
 

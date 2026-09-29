@@ -1,14 +1,15 @@
 """Stale knowledge report for doctor.
 
-Detects three classes of knowledge rot that the deterministic toolkit can find
-without external services:
+Reports three review signals that the deterministic toolkit can find without
+external services:
 
-- zero-adoption Publications: 发布后长时间没有任何 Work adopt
-- stale active knowledge:    长期未修改且仍标 active
-- long-lived draft:          draft 状态保持过久
+- Publications without a matching Adoption record after the observation window
+- active knowledge whose recorded modification is old
+- drafts whose recorded modification is old
 
-These are surfaced through ``team-wiki doctor --report stale`` as warnings so
-repository owners can decide whether to deprecate, refresh, or re-adopt.
+These signals do not prove whether knowledge was used or whether it is invalid.
+They are surfaced through ``team-wiki doctor --report stale`` for source and
+scope review.
 
 All computation is local: we only scan ``.knowledge/records/`` and knowledge
 frontmatter. No network, no central server.
@@ -135,7 +136,7 @@ def build_stale_report(
     now = now or datetime.now(timezone.utc)
     report = StaleReport()
 
-    # 1. zero-adoption Publications
+    # 1. Publications without a matching Adoption record in this repository.
     publications = _publication_records(root)
     adoptions = _adoption_records(root)
     adopted_pub_ids = {str(a.get("publication_id")) for a in adoptions if a.get("publication_id")}
@@ -192,15 +193,18 @@ def build_stale_report(
 
 def format_stale_report(report: StaleReport) -> str:
     """Human-readable rendering for ``doctor --report stale``."""
-    lines: list[str] = ["# Stale Knowledge Report", ""]
+    lines: list[str] = ["# Knowledge Review Signals", ""]
     if report.total == 0:
-        lines.append("✅ 未发现知识老化信号。")
+        lines.append("✅ 未发现超过复核阈值的信号。")
         return "\n".join(lines)
 
     if report.zero_adoption_publications:
-        lines.append(f"## 零 Adoption Publication（{len(report.zero_adoption_publications)}）")
+        lines.append(f"## 未记录到采用的 Publication（{len(report.zero_adoption_publications)}）")
         lines.append("")
-        lines.append("以下 Publication 发布后长期未被任何 Work adopt，建议检查是否仍适用或标记 deprecated：")
+        lines.append(
+            "以下 Publication 超过观察期后仍没有对应的 Adoption 记录。"
+            "这只表示记录中未发现采用，不等于没有实际使用。"
+        )
         lines.append("")
         for row in report.zero_adoption_publications:
             lines.append(
@@ -210,26 +214,26 @@ def format_stale_report(report: StaleReport) -> str:
         lines.append("")
 
     if report.stale_active_knowledge:
-        lines.append(f"## 长期未更新的 Active 知识（{len(report.stale_active_knowledge)}）")
+        lines.append(f"## 距上次记录修改较久的 Active 知识（{len(report.stale_active_knowledge)}）")
         lines.append("")
-        lines.append("以下知识仍为 active 但长期未修改，建议 owner 复核是否仍成立：")
+        lines.append("修改时间较早只是复核线索，不能据此判定知识失效。建议核对现有来源和适用范围：")
         lines.append("")
         for row in report.stale_active_knowledge:
             lines.append(
                 f"- `{row['knowledge_id']}` ({row['path']}) "
-                f"最后更新 {row['last_touched']}（{row['age_days']} 天前）"
+                f"最近可用修改时间 {row['last_touched']}（{row['age_days']} 天前）"
             )
         lines.append("")
 
     if report.long_lived_drafts:
-        lines.append(f"## 长期停留在 Draft 的知识（{len(report.long_lived_drafts)}）")
+        lines.append(f"## 超过观察期的 Draft（{len(report.long_lived_drafts)}）")
         lines.append("")
-        lines.append("以下知识 draft 状态保持过久，建议推进审核或标记废弃：")
+        lines.append("以下知识仍为 draft 且超过观察期；时间本身不决定应发布还是废弃，建议核对来源和当前需求：")
         lines.append("")
         for row in report.long_lived_drafts:
             lines.append(
                 f"- `{row['knowledge_id']}` ({row['path']}) "
-                f"创建于 {row['last_touched']}（{row['age_days']} 天前）"
+                f"最近可用修改时间 {row['last_touched']}（{row['age_days']} 天前）"
             )
         lines.append("")
 

@@ -1,5 +1,7 @@
 # Upstream reuse map
 
+以下为 V0.1—V0.8 的历史评估记录；现行行为见 `FINAL_DESIGN.md`。V0.9 已移除 Node.js 运行层和启发式关系评分，保留来源声明。
+
 | 上游能力 | V0.1 | 后续策略 |
 |---|---|---|
 | project-wiki init/scan/update/sync/maintain | 设计语义保留 | 逐步映射到统一 W/E/CHG 契约 |

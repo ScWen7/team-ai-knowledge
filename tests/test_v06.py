@@ -6,18 +6,17 @@ import unittest
 
 import yaml
 
-from team_wiki.batch import batch_context, create_candidate_batch
-from team_wiki.candidate import apply_patch_plan, create_candidate, create_patch_plan
+from team_wiki.candidate import apply_patch_plan, patch_plan_path, plan_patch
 from team_wiki.core import (
     adopt_knowledge,
     finalize_work,
     init_team,
     observe_knowledge,
+    parse_frontmatter,
     prepare_work,
     register_source,
 )
 from team_wiki.dependency import dependency_impact
-from team_wiki.evidence import bind_evidence
 from team_wiki.intake import intake_source
 from team_wiki.publication import adoption_status, record_publication
 from team_wiki.review import resolve_review
@@ -102,66 +101,6 @@ depends_on: [K-B]
             encoding="utf-8",
         )
 
-    def test_multi_source_batch_preserves_all_evidence(self):
-        with TemporaryDirectory() as td:
-            root = Path(td) / "kb"
-            init_team(root, "demo-team")
-            e1 = self._evidence(
-                root,
-                "review-1.md",
-                "# 电话规则\n草稿导入阶段联系电话可以为空。\n",
-            )
-            e2 = self._evidence(
-                root,
-                "review-2.md",
-                "# 电话规则\n正式提交前联系电话必须补齐。\n",
-            )
-
-            c1 = create_candidate(
-                root,
-                proposed_id="K-A",
-                title="草稿阶段规则",
-                knowledge_type="rule",
-                statement="草稿导入阶段联系电话可以为空。",
-            )
-            c2 = create_candidate(
-                root,
-                proposed_id="K-A",
-                title="正式提交规则",
-                knowledge_type="rule",
-                statement="正式提交前联系电话必须补齐。",
-            )
-            c1_id = yaml.safe_load(c1.read_text(encoding="utf-8"))["candidate_id"]
-            c2_id = yaml.safe_load(c2.read_text(encoding="utf-8"))["candidate_id"]
-            bind_evidence(
-                root, e1,
-                target_kind="candidate",
-                target_id=c1_id,
-                relation="limits",
-            )
-            bind_evidence(
-                root, e2,
-                target_kind="candidate",
-                target_id=c2_id,
-                relation="supports",
-            )
-
-            batch = create_candidate_batch(
-                root,
-                [c1_id, c2_id],
-                title="订单联系电话按阶段校验",
-                merged_statement="草稿可为空，正式提交前必须补齐。",
-            )
-            batch_id = yaml.safe_load(batch.read_text(encoding="utf-8"))["batch_id"]
-            ctx = batch_context(root, batch_id)
-            self.assertEqual(len(ctx["candidates"]), 2)
-            self.assertEqual(len(ctx["merged_candidate"]["evidence"]), 2)
-            self.assertEqual(
-                {x["source_id"] for x in ctx["merged_candidate"]["evidence"]},
-                {x["source_id"] for x in ctx["batch"]["evidence"]},
-            )
-            self.assertFalse(ctx["requires_semantic_review"])
-
     def test_patch_dependency_publish_and_adoption_loop(self):
         with TemporaryDirectory() as td:
             root = Path(td) / "kb"
@@ -185,47 +124,22 @@ depends_on: [K-B]
                 "# 电话\n正式提交前联系电话必须补齐。\n",
             )
 
-            c1 = create_candidate(
+            planned = plan_patch(
                 root,
-                proposed_id="K-A",
-                title="草稿阶段",
-                knowledge_type="rule",
-                statement="草稿导入阶段联系电话可以为空。",
-                owner="order-owner",
-            )
-            c2 = create_candidate(
-                root,
-                proposed_id="K-A",
-                title="提交阶段",
-                knowledge_type="rule",
-                statement="正式提交前联系电话必须补齐。",
-                owner="order-owner",
-            )
-            c1_id = yaml.safe_load(c1.read_text(encoding="utf-8"))["candidate_id"]
-            c2_id = yaml.safe_load(c2.read_text(encoding="utf-8"))["candidate_id"]
-            bind_evidence(root, e1, target_kind="candidate", target_id=c1_id, relation="limits")
-            bind_evidence(root, e2, target_kind="candidate", target_id=c2_id, relation="supports")
-
-            batch = create_candidate_batch(
-                root,
-                [c1_id, c2_id],
-                title="订单联系电话按阶段校验",
-                merged_statement="草稿导入可为空；正式提交前必须补齐。",
-                owner="order-owner",
-            )
-            merged_id = yaml.safe_load(batch.read_text(encoding="utf-8"))[
-                "merged_candidate_id"
-            ]
-
-            plan = create_patch_plan(
-                root,
-                merged_id,
+                knowledge_id="K-A",
                 comparison="narrows",
                 summary="将全阶段必填收窄为正式提交前必填。",
+                statement="草稿导入可为空；正式提交前必须补齐。",
+                evidence_ids=[e1, e2],
                 owner="order-owner",
-                target_knowledge_id="K-A",
             )
-            plan_data = yaml.safe_load(plan.read_text(encoding="utf-8"))
+            plan_data = planned["plan"]
+            plan = patch_plan_path(root, planned["plan_id"])
+            self.assertEqual(
+                {row["evidence_id"] for row in plan_data["evidence"]},
+                {e1, e2},
+            )
+            self.assertEqual(len({row["source_id"] for row in plan_data["evidence"]}), 2)
             proposed = Path(td) / "revised.md"
             proposed.write_text(
                 """---
@@ -323,6 +237,15 @@ evidence: []
                 status["adoptions"][0]["outcome"],
                 "supported-in-scope",
             )
+            self.assertEqual(
+                status["adoptions"][0]["observations"][0]["note"],
+                "项目 B 的草稿和正式提交验证均符合新规则。",
+            )
+
+            change_path = next((root / "changes").rglob(f"{plan_data['change_id']}.md"))
+            change_meta, _ = parse_frontmatter(change_path)
+            self.assertEqual(change_meta["stage"], "published")
+            self.assertNotIn("publication", change_meta)
 
 
 if __name__ == "__main__":

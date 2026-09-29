@@ -1,240 +1,133 @@
 # team-ai-knowledge
 
-团队级 AI 知识库的设计与 V0.1 试验实现。
+team-wiki 是面向团队知识库和项目知识库的本地工具。当前版本 V0.9：项目存量文档治理、直接读取文件的中文检索，以及显式团队底线的版本读取和检查。
 
-## 三种角色，三条路径
+同时服务四个目标：AI 开发标准化；事实经验持久沉淀；非技术成员低成本维护；内容增长后的准确性与性能。设计契约见 [现行设计](docs/FINAL_DESIGN.md)，验证记录见 [VALIDATION](docs/VALIDATION.md)。
 
-| 角色 | 你要做什么 | 入口 |
-|---|---|---|
-| **产品经理 / 知识读者** | 看知识、交资料、提建议 | 浏览器打开仓库 → [`docs/PRODUCT_MANAGER_GUIDE.md`](docs/PRODUCT_MANAGER_GUIDE.md) |
-| **工程师 / 知识使用者** | 在项目里消费团队知识 | 下方"工程师高频 2 命令" |
-| **知识管理员 / 工具维护者** | 登记资料、审 CHG、发布、治理 | `team-wiki status .` 看今天该做什么 |
+## 知识放在哪里
 
-## 工程师高频 2 命令（V0.8 起）
+- 团队库：团队业务认知、共同规范、共享经验、协作流程和项目入口。
+- 项目库：项目设计、决策、实现约束、踩坑和迭代证据，沿用原目录。
+- 工具仓库：本仓库，只维护工具、设计、示例与测试。
 
-在一个**已接入团队知识库的项目**里，一次任务只需要这 2 条命令：
+项目经验经提炼和审核后进入团队域，保留项目来源引用。无需复制项目正文或统一项目目录。
 
-```bash
-# 1. 开始：start 门禁 → 固定知识版本快照 → 直接返回锁定正文
-team-wiki project-work . <team-root> --phase start \
-  --goal "实现订单导入" --read K-A
-# → 返回 work_id 和 K-A 的锁定正文（从 Git 历史精确读取，不读当前工作树）
+## 成员入口
 
-# 2. 收尾：记录采用与结果 → release 门禁 → 回报团队知识库
-team-wiki project-work . <team-root> --phase finish \
-  --work-id <work-id> \
-  --adopt K-A --used-for "实现导入校验" \
-  --observe "K-A:supported-in-scope:批量场景验证通过"
-```
+不安装工具的成员可用已有 Git Web 浏览文档、提交资料、提出文档修改，或直接让当前 Agent 协助。负责人沿用现有审核渠道；不会自动分配负责人、创建 CHG 或发布知识。具体动作见 [成员指南](docs/PRODUCT_MANAGER_GUIDE.md)。
 
-> 门禁没有因此放松：`must-address` 仍在开始时阻断，`review-required` 仍在交付前阻断，
-> 任务中途 lock 变化仍会拒绝收尾。需要分步执行时用原来的 5 条命令：
-> `project-prepare / project-context / project-adopt / project-observe / project-finalize`。
+普通查阅无需创建 Work，也无需填采用记录。`search` 是探索检索，结果包含草稿等状态；确认结论前需核对正文、来源和适用范围。只想看 active 条目时显式加 `--status active`；active 元信息本身不证明审批完成。
 
-其他命令（`init / ingest / publish / doctor / connector / review / batch / patch-*` 等）属于**知识管理员路径**，普通工程师不需要掌握。
+## 安装
 
-## 知识管理员：今天该做什么
+需要 Python 3.10+ 与 Git，无需 Node.js 或中央服务。
 
 ```bash
-team-wiki status .
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+team-wiki --help
 ```
 
-输出一份待决策清单：哪些变更被 Review 阻塞、哪些知识发布后没人用、哪些规则长期没更新、
-哪些资料堆在 inbox 里没登记——每一项都带原因和可直接执行的下一步命令。
+只在本地虚拟环境安装。部署或启用远端工作流属于独立操作。
 
-## 知识管理员常用路径
+## 接入已有项目文档
 
-修改一条知识的最短路径（V0.8 起）：
+先只读查看治理差异，再应用可确定的格式补全：
 
 ```bash
-# 1. 资料登记 + 切分成可引用的证据片段
-team-wiki ingest . ./notes.md --title "示例资料"
-team-wiki intake-source . <source-id>
-
-# 2. 一次调用决定保留哪些片段（不必逐块声明）
-team-wiki intake-decide . <intake-id> --keep-evidence <evidence-id>
-
-# 3. 直接规划知识修改（无需先理解 Candidate）
-team-wiki patch-plan-direct . \
-  --knowledge <knowledge-id> \
-  --comparison narrows \
-  --statement "修改后的结论" \
-  --evidence <evidence-id> \
-  --summary "变更摘要"
-
-# 4. 读取上下文 → 写完整 Markdown → 安全应用
-team-wiki patch-context . <plan-id>
-team-wiki patch-apply . <plan-id> ./revision.md
-
-# 5. 人工审核 → 提交 → 正式发布
-git commit -am "..."
-team-wiki publish . <change-id> <knowledge-id> --requirement review-required
+team-wiki govern ./project --docs 知识库
+team-wiki project-init ./project --project-id my-project --docs 知识库 --apply
+team-wiki doctor ./project
 ```
 
-需要逐块精细控制时仍可用 `intake-apply`；需要显式审阅 Candidate 时仍可用 `candidate-create` / `patch-plan`。
+`--docs` 可以重复指定目录或单个 Markdown；不提供时优先使用已保存范围，再识别常见文档目录。`govern` 默认完全只读。`project-init` 写入工具配置和忽略项，未加 `--apply` 时只预览正文治理。
+
+治理保留现有元信息、正文、代码块和项目导航，仅补齐确定的身份/标题和待确认标记。未知类型、有效性、责任或来源列入报告，不自动确认。重复执行不生成新 ID 或无意义差异。
+
+工具导航位于 `.knowledge/documents.md`，原有 INDEX 不被覆盖。归档、指令入口、隐藏目录和越界链接不纳入批量正文修改。报告中的语义问题需要负责人判断，格式通过不等于知识正确。
 
 ## 查找知识
 
 ```bash
-team-wiki search . "手机号能不能为空"
-team-wiki context . "重复导入会怎么样"     # 检索 + 关系扩展 + 上下文预算
-team-wiki related . RULE-CONTACT-PHONE      # 按关系图找相关知识
+team-wiki search ./project "依赖更新后为什么仍用旧版本"
+team-wiki search ./project "权限" --status active --scope 知识库 --limit 10
+team-wiki context ./project "构建失败"
+team-wiki related ./project K-EXAMPLE
 ```
 
-中文可直接用整句提问，无需自行分词。`search` 静默返回空列表是故障信号，
-不是「知识不存在」的证据。
+查询直接读取已配置范围内的当前 Markdown 和 frontmatter。成员 `git pull`、切换版本或直接编辑后，下一次查询就使用更新后的文件，无需执行 SQL、刷新索引或安装 Git 钩子。检索不创建数据库、不维护跨查询缓存；旧检索数据库即使存在也不会被读取、改写或删除。
 
-## 内容
+`--scope` 精确匹配显式 scope、库 ID 或仓库相对目录范围，不推断业务适用性。`index` 在团队库生成 Markdown 导航；在项目库只检查文档，项目导航通过 `govern` 维护。
 
-- `docs/FINAL_DESIGN.md`：最终统一设计与建设指引
-- `docs/PRODUCT_MANAGER_GUIDE.md`：产品经理 Web-only 使用指南
-- `docs/V0.8_SCOPE.md`：使用减负落地范围（当前版本）
-- `src/team_wiki/`：knowledge-kit V0.1 的确定性实现
-- `examples/team-knowledge/`：可运行示例
-- `tests/`：首版行为测试
-- `upstream.lock.yml`：project-wiki / llm_wiki 评估基线
+`related` 仅返回当前文件中的显式引用及反向引用。一次 `context` 调用内部复用刚读取的文档，调用结束即释放。`context` 返回检索计划，尚未装配或裁切正文；`budget` 兼容入口仅给字符预算建议，结果标明 `applied=false`。这些入口不替代共同底线读取。
 
-## V0.1 能力
+单个文件损坏（YAML 错误、读取期间被改写）时，`search` 跳过该文件并在 stderr 输出 `warning:`；重复 ID 的文档仍可检索但会被报告。这些提示表示知识库有问题需要负责人处理，不表示查询失败。
 
-- 初始化 team-knowledge 工作区；
-- 将资料登记为稳定 source package；
-- 生成 `sources/wiki/changes` 索引；
-- 校验知识 ID、基础目录和来源资料包；
-- 检查目录增长与 inbox 积压；
-- 简单关键词搜索；
-- 创建知识变更记录；
-- 记录一次工作快照。
-
-## 快速开始（知识管理员）
-
-> 工程师日常使用请直接看上方"高频 2 命令"；本节仅面向第一次搭建知识库或做知识治理的管理员。
+## Agent 入口与检索评测
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -e .
-
-team-wiki init ./demo --repository-id demo-team
-team-wiki doctor ./demo
-team-wiki ingest ./demo ./notes.md --title "示例资料"
-team-wiki index ./demo
-team-wiki search ./demo "订单 导入"
-team-wiki prepare ./demo --goal "验证一项知识工作"
+team-wiki agent-entry ./project           # 预览
+team-wiki agent-entry ./project --apply   # 写入 AGENTS.md 中带标记的约定块，其余内容不动
+team-wiki eval ./project -k 5             # 读取 .knowledge/eval.yml，输出 recall@k、MRR、负例通过数
 ```
 
-> V0.2 已增加 project-wiki source-scope 适配、llm_wiki 关系/字符预算适配，以及 Work → Evidence → Observation → Change 最小闭环。完整自动编译、Review 重开、LanceDB、MCP 与 CI 门禁仍未实现。
+约定块要求 Agent 开工前读取底线并先搜索、收工时判断是否沉淀、检索遗漏时追加评测用例。评测用例格式：
 
+```yaml
+cases:
+  - query: 依赖更新后为什么仍用旧版本
+    expect: [知识库/经验库/踩坑记录/base-SNAPSHOT不刷新.md]   # ID 或仓库相对路径
+  - query: 区块链共识算法
+    expect_none: true
+```
 
-## V0.2 分支
+## 接入团队共同底线
 
-当前实现位于 `feature/v0.2-knowledge-loop`，详见 `docs/V0.2_SCOPE.md`。合并前需确认 GPLv3 适配代码的整体分发许可证策略。
+团队底线由项目明确订阅，完整读取，不经 Top-K。以下命令仅用于已决定接入版本化底线的项目：
 
+```bash
+team-wiki project-init ./project --project-id my-project \
+  --team-repository-id my-team --knowledge-id RULE-SECURITY --knowledge-id RULE-DELIVERY
+team-wiki project-lock ./project ./team-knowledge
+team-wiki project-rules ./project ./team-knowledge
+team-wiki project-gate ./project ./team-knowledge --phase release
+```
 
-## License
+`project-rules` 无需 Work，返回所有订阅底线的锁定正文并检查源身份、Publication 与 Git 内容一致性。`must-address` 和 `review-required` 的已有 start/release 行为保留。实际测试、人工审核、交付证据仍按项目规则执行。
 
-从 V0.2 起，本仓库以 GNU GPL v3 发布。原因是 V0.2 开始包含基于 `nashsu/llm_wiki` GPLv3 源码适配的模块。
+如明确需要工作快照与采用追溯，可继续使用 `project-work` 或分步命令。它们不是普通知识查阅的前置条件，也不会代替项目设计和踩坑文档。
 
-- project-wiki 来源部分继续保留其 MIT 声明；
-- llm_wiki 适配模块保留 GPLv3 来源和修改说明；
-- 详细第三方声明见 `third-party-notices/`。
+## 创建团队库与贡献
 
-这是一项工程分发策略，不替代组织自身的法律审查。
+```bash
+team-wiki init ./team-knowledge --repository-id my-team
+team-wiki doctor ./team-knowledge
+```
 
+成员提交资料或指出问题后，Agent/维护者定位已有知识，准备带原因、来源和影响的 Markdown 差异，由负责人按既有 Git 审核流程确认。
 
-## V0.3
+## 命令分层
 
-当前 V0.3 分支继续补齐知识闭环：
+`team-wiki --help` 只列出日常与规则发布链命令：
 
-- Review 稳定身份与新证据重开；
-- 来源修订影响追踪；
-- Text/Markdown intake 分块与 review-progress；
-- 确定性 GitHub Actions 回归。
+- **日常**：`search`、`related`、`context`、`govern`、`project-init`、`agent-entry`、`eval`、`doctor`、`status`、`index`、`init`。
+- **团队底线**：`project-rules`、`project-lock`、`project-status`、`project-update`、`project-gate`；团队库发布侧使用 `change`、`publish`、`publication-list`、`review-*`。
+- **已冻结的旧协议**：`ingest`、`intake-*`、`evidence-*`、`candidate-*`、`patch-*`、`connector-*`、`scope-*`、`dependency-impact`、`adoption-status`、`prepare`/`adopt`/`observe`/`finalize`、`project-prepare`/`project-context`/`project-adopt`/`project-observe`/`project-finalize`/`project-work`、`budget`。不出现在帮助中，调用时输出 `notice:`，行为保持兼容，不再新增功能。试点后按实际使用决定删除；历史记录不清空、不强制迁移。
 
-详见 `docs/V0.3_SCOPE.md`。
+`publish` 生成本地 Publication 记录并校验提交内容和未决 Review，不执行 push/merge，不证明远端审批。原始资料自动解析限 UTF-8 文本和 Markdown，PDF/Word 需先转换并保留原始来源。`status` 的无采用记录和久未更新仅为可观测线索，不判定知识无人使用或失效。
 
+## 验证与当前边界
 
-## V0.4
+```bash
+python -m unittest discover -s tests
+python scripts/benchmark_retrieval.py
+```
 
-V0.4 引入 Evidence Layer：
+工程验证与规模结果记在 [验证记录](docs/VALIDATION.md)。合成语料不代表真实团队语义命中率；多人、非技术成员贡献和跨项目复用仍需真实试点验证。不存在“中文检索 100%”的通用承诺。
 
-- 稳定 source identity 与 source revision 分离；
-- 来源逻辑路径与本地资料包路径分离；
-- processing.yml 记录 parser / version / effective config；
-- Evidence Chunk 保存 source revision、heading path、字符定位和 index state；
-- 人工纠正不覆盖 parser output；
-- Evidence 可以绑定 candidate / knowledge / change / review；
-- 来源更新影响分析同时使用 frontmatter source 引用和 evidence binding；
-- source-status 区分 acquisition / processing / evidence / knowledge-change（V0.8 起不再输出恒假的 indexing 维度）。
+## 历史与许可证
 
-WeKnora 作为来源/证据处理的设计参考，不作为第三个必须运行的平台。详见 `docs/V0.4_SCOPE.md`。
+`docs/history/` 保存 V0.1—V0.9 范围文档与上游复用评估，仅供追溯；现行行为以本 README 和 `FINAL_DESIGN.md` 为准。
 
-
-## V0.5
-
-V0.5 打通两条链路：
-
-- **Evidence → Candidate → Knowledge Patch Plan → stale-safe apply**；
-- **Local Git Connector → checkpoint → incremental add/modify/rename/delete**。
-
-关键边界：
-
-- Candidate/Comparison 由当前 Agent 或领域责任人明确，不由确定性脚本猜业务语义；
-- Patch Plan 同时锁定目标 Knowledge base hash 和 Evidence current hash；
-- `patch-apply` 只修改贡献工作区并把 CHG 推进到 proposed，不等于发布；
-- Git Connector 只在整批事件成功后推进 checkpoint；
-- rename 保持 source_id；
-- rename 移出 scope 与真正 delete 分开处理；
-- 没有知识依赖的来源更新不自动制造 CHG/Review。
-
-详见 `docs/V0.5_SCOPE.md`。
-
-
-## V0.6
-
-V0.6 把多来源证据、显式依赖、正式发布和后续采用串成一条完整链：
-
-- Candidate Batch：多份来源/候选显式归并为 merged Candidate；
-- dependency-impact：仅沿 depends_on 传播强影响；
-- Patch Apply 自动建立 dependency Review；
-- publish：要求 Review 已处理且真实 Git commit 中的正文 hash 匹配；
-- prepare/adopt 自动绑定最新 Publication；
-- finalize 生成共享 Adoption Record；
-- adoption-status 查看最新发布版本被哪些 consumer 真正采用。
-
-详见 `docs/V0.6_SCOPE.md`。
-
-
-## V0.7
-
-V0.7 将团队知识 Publication 正式接入业务项目消费流程：
-
-- 项目显式声明 `knowledge_ids`；
-- `.knowledge/knowledge.lock.yml` 固定精确 Publication；
-- `notice / review-required / must-address` 转化为 start/release 门禁；
-- review-required 支持有理由 defer；
-- must-address 必须升级 lock，不能 defer；
-- Work 开始固定 lock SHA 和完整快照；
-- `project-context` 从 Git 历史 commit 精确读取锁定正文；
-- 任务中途 lock 改变时 finalize 拒绝，避免静默混用版本；
-- Project finalize 将实际 Publication adoption 回报 team-knowledge。
-
-详见 `docs/V0.7_SCOPE.md`。
-
-
-## V0.8
-
-V0.8 不增加业务对象，只削减使用路径：
-
-- `intake-decide`：一次调用决定整份 intake，逐块声明从 O(块数) 降到 O(1)；
-- 移除恒为假的 `indexing` 状态维度（LanceDB 未实现，字段永远为 `not-indexed`）；
-- **修复中文检索**：原实现只按空白切词，中文自然语言提问命中率 0%；
-  改为字符 n-gram + 字段加权后恢复到 100%，且无关提问仍干净拒绝；
-- `patch-plan-direct`：Candidate 降级为实现细节，内部记录与门禁完全不变；
-- `project-work`：项目侧 5 步收敛为 2 步，所有门禁照常执行；
-- `status`：把已有信号汇总成带原因和下一步命令的待决策清单；
-- Candidate Batch 标记为实验性，移出主推荐路径；
-- 修复 macOS 临时目录下 `patch-apply` 的路径崩溃。
-
-以 3 万字文档（7 块）修改一条知识为例，命令调用数从 17 降到 10；
-项目侧一次任务从 5 条降到 2 条。全部原命令与数据格式保留。
-详见 `docs/V0.8_SCOPE.md`。
+仓库继续使用 GNU GPL v3。移除 Node.js 执行层不会抹去历史代码来源，第三方来源与修改说明保留在 `third-party-notices/`，评估基线保留在 `upstream.lock.yml`。

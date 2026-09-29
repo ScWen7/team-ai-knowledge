@@ -7,6 +7,7 @@ import yaml
 from team_wiki.core import (
     adopt_knowledge,
     context_plan,
+    context_budget,
     finalize_work,
     index_workspace,
     init_team,
@@ -15,7 +16,6 @@ from team_wiki.core import (
     record_evidence,
     related,
 )
-from team_wiki.node_core import available, context_budget
 from team_wiki.scope import SourceScope, SourceScopeError
 
 
@@ -38,7 +38,6 @@ class V02Tests(unittest.TestCase):
         p.write_text("---\n" + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False) + "---\n# " + title + "\n", encoding="utf-8")
         return p
 
-    @unittest.skipUnless(available(), "Node.js unavailable")
     def test_budget_and_relationships(self):
         b = context_budget(100_000)
         self.assertEqual(b["unit"], "characters")
@@ -46,6 +45,7 @@ class V02Tests(unittest.TestCase):
         self.assertEqual(b["indexBudget"], 5_000)
         self.assertEqual(b["pageBudget"], 50_000)
         self.assertEqual(b["maxPageSize"], 15_000)
+        self.assertFalse(b["applied"])
 
         with TemporaryDirectory() as td:
             root = Path(td) / "kb"
@@ -55,6 +55,8 @@ class V02Tests(unittest.TestCase):
             self._knowledge(root, "c", "K-C", "无关概念", "concept", ["SRC-9"])
             rows = related(root, "K-A", 3)
             self.assertEqual(rows[0]["id"], "K-B")
+            self.assertEqual([row["id"] for row in rows], ["K-B"])
+            self.assertEqual(related(root, "K-C", 3), [])
             plan = context_plan(root, "订单 导入", 100_000, 3)
             self.assertEqual(plan["budget"]["unit"], "characters")
             self.assertTrue(plan["direct"])

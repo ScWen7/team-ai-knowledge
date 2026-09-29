@@ -12,3 +12,5 @@ V0.2 knowledge-core modules are adapted from:
 Adaptations remove desktop filesystem/UI/runtime dependencies and replace basename identity with the normalized team-wiki knowledge ID input contract.
 
 The repository adopts GNU GPL v3 for V0.2 distribution. This notice preserves the llm_wiki source provenance and modification boundary.
+
+V0.9 removes the Node.js execution layer and heuristic graph ranking. Explicit links are handled in Python. The legacy character-budget compatibility calculation remains in `core.py`; this historical provenance notice and the repository license are retained.

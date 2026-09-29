@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .core import _rewrite_change_meta, knowledge_ref, parse_frontmatter, read_yaml, utc_now, write_yaml
+import yaml
+
+from .core import knowledge_ref, parse_frontmatter, read_yaml, utc_now, write_yaml
 from .review import find_review
 
 
@@ -111,7 +113,7 @@ def record_publication(
         raise ValueError(f"invalid adoption requirement: {adoption_requirement}")
 
     change_path = _change_path(root, change_id)
-    change_meta, _ = parse_frontmatter(change_path)
+    change_meta, change_body = parse_frontmatter(change_path)
     if change_meta.get("stage") not in {"proposed", "ready", "published"}:
         raise ValueError(
             f"change {change_id} is not publication-ready: stage={change_meta.get('stage')}"
@@ -152,25 +154,20 @@ def record_publication(
             },
         )
 
-    _rewrite_change_meta(
-        change_path,
-        {
-            "stage": "published",
-            "publication": {
-                "publication_id": publication_id,
-                "knowledge_id": knowledge_id,
-                "published_ref": commit,
-                "content_sha256": current_sha,
-                "adoption_requirement": adoption_requirement,
-                "published_at": published_at,
-                "effective_at": effective_at,
-            },
-        },
+    change_meta.pop("publication", None)
+    change_meta["stage"] = "published"
+    change_path.write_text(
+        "---\n"
+        + yaml.safe_dump(change_meta, allow_unicode=True, sort_keys=False).rstrip()
+        + "\n---\n"
+        + change_body,
+        encoding="utf-8",
     )
     return out
 
 
 def record_work_adoptions(root: Path, work: dict[str, Any]) -> list[Path]:
+    """Record adoption facts and their observations without creating knowledge."""
     consumer_id = str(work.get("consumer_id") or "unknown")
     work_id = str(work["work_id"])
     out: list[Path] = []
@@ -196,6 +193,8 @@ def record_work_adoptions(root: Path, work: dict[str, Any]) -> list[Path]:
                     "used_for": item.get("used_for"),
                     "outcome": item.get("outcome"),
                     "evidence_ids": item.get("evidence_ids") or [],
+                    **({"note": item["note"]} if item.get("note") is not None else {}),
+                    "observations": list(item.get("observations") or []),
                     "recorded_at": utc_now(),
                 },
             )
