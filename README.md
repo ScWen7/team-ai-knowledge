@@ -1,133 +1,130 @@
 # team-ai-knowledge
 
-team-wiki 是面向团队知识库和项目知识库的本地工具。当前版本 V0.9：项目存量文档治理、直接读取文件的中文检索，以及显式团队底线的版本读取和检查。
+**让一个人解决过的问题，其他人不必从头再解决。**
 
-同时服务四个目标：AI 开发标准化；事实经验持久沉淀；非技术成员低成本维护；内容增长后的准确性与性能。设计契约见 [现行设计](docs/FINAL_DESIGN.md)，验证记录见 [VALIDATION](docs/VALIDATION.md)。
+team-wiki 是供成员现有 Agent 使用的本地知识工具。项目文档保持原位；团队经验保存在团队库；工具负责定位、读取范围和必要检查，不再要求每次查阅、贡献都创建管理记录。
 
-## 知识放在哪里
+## 先用它解决一个问题
 
-- 团队库：团队业务认知、共同规范、共享经验、协作流程和项目入口。
-- 项目库：项目设计、决策、实现约束、踩坑和迭代证据，沿用原目录。
-- 工具仓库：本仓库，只维护工具、设计、示例与测试。
+在已接入的项目里，直接告诉当前 Agent：
 
-项目经验经提炼和审核后进入团队域，保留项目来源引用。无需复制项目正文或统一项目目录。
+> 依赖已经升级了，为什么构建还在用旧版本？先查项目和团队已有经验，核对原文与适用环境，再给我下一步检查建议和来源。
 
-## 成员入口
+Agent 应查找已授权的本地资料、读取原文，回答眼前的问题，而不是只给文档列表。没找到时可以继续分析代码和日志，但必须说明哪些是已有结论、哪些是本次分析；无法访问资料不能说成知识不存在。
 
-不安装工具的成员可用已有 Git Web 浏览文档、提交资料、提出文档修改，或直接让当前 Agent 协助。负责人沿用现有审核渠道；不会自动分配负责人、创建 CHG 或发布知识。具体动作见 [成员指南](docs/PRODUCT_MANAGER_GUIDE.md)。
+得到新结论或发现错误时：
 
-普通查阅无需创建 Work，也无需填采用记录。`search` 是探索检索，结果包含草稿等状态；确认结论前需核对正文、来源和适用范围。只想看 active 条目时显式加 `--status active`；active 元信息本身不证明审批完成。
+> 把这次确认的原因补到原来的排查记录，写清适用条件和依据，不要重复生成一篇文档。
 
-## 安装
+没有值得留下的新信息，就正常结束。不要求每次填写采用记录、做收工汇报。成员也可直接浏览团队库导航或现有项目文档，不必使用命令行。
 
-需要 Python 3.10+ 与 Git，无需 Node.js 或中央服务。
+## 维护者首次接入：先查找，再按需要整理
+
+需要 Python 3.10+、Git。只在本地虚拟环境安装；不需要 Node.js、中央服务、数据库、索引刷新或 Git 钩子。
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
-team-wiki --help
+
+# 文档原位接入；不加 --apply 就不补元信息、不修改正文。
+team-wiki project-init ./project --project-id my-project --docs 知识库 \
+  --team-root ./team-knowledge
+team-wiki agent-entry ./project --apply
+team-wiki search ./project "依赖更新后为什么仍用旧版本" --connected --limit 5
 ```
 
-只在本地虚拟环境安装。部署或启用远端工作流属于独立操作。
+`--team-root` 是明确授权读取的本机团队库目录，可省略。工具校验该库的身份，路径只写入忽略的 `.knowledge/local.yml`，不会订阅规则、自动下载仓库、联网同步或把路径写进共享配置。其他成员首次接入时配置自己的路径即可。团队尚无知识库时先执行 `team-wiki init ./team-knowledge --repository-id my-team`。
 
-## 接入已有项目文档
+`--docs` 可重复指定目录或单个 Markdown；省略时沿用已保存范围，或识别 docs、doc、knowledge、knowledge-base、文档、知识库和根 README。即使没有元信息也可查阅。常见目录中的未初始化项目也能直接 `search`，但显式接入更容易保证范围正确。
 
-先只读查看治理差异，再应用可确定的格式补全：
+Agent 入口只修改带标记的约定块，保留其余原文。使用 CLAUDE.md 的环境显式执行 `team-wiki agent-entry ./project --entry-file CLAUDE.md --apply`。维护者应确认当前 Agent 实际加载了所选入口；生成文件不等于已被每一种 Agent 自动读取。
 
-```bash
-team-wiki govern ./project --docs 知识库
-team-wiki project-init ./project --project-id my-project --docs 知识库 --apply
-team-wiki doctor ./project
-```
+成员不必完成上述安装与配置，交由有权限的维护者或当前 Agent 一次性处理。工具不可用时可以人工读原文，不冒充已执行检索或检查。
 
-`--docs` 可以重复指定目录或单个 Markdown；不提供时优先使用已保存范围，再识别常见文档目录。`govern` 默认完全只读。`project-init` 写入工具配置和忽略项，未加 `--apply` 时只预览正文治理。
-
-治理保留现有元信息、正文、代码块和项目导航，仅补齐确定的身份/标题和待确认标记。未知类型、有效性、责任或来源列入报告，不自动确认。重复执行不生成新 ID 或无意义差异。
-
-工具导航位于 `.knowledge/documents.md`，原有 INDEX 不被覆盖。归档、指令入口、隐藏目录和越界链接不纳入批量正文修改。报告中的语义问题需要负责人判断，格式通过不等于知识正确。
-
-## 查找知识
+## 查找与使用的边界
 
 ```bash
-team-wiki search ./project "依赖更新后为什么仍用旧版本"
+# 一次查找本项目与本机明确接入的资料，结果按仓库分别返回。
+team-wiki search ./project "构建失败" --connected --limit 5
+team-wiki context ./project "构建失败" --connected
+# 原单库接口保持可用。
 team-wiki search ./project "权限" --status active --scope 知识库 --limit 10
-team-wiki context ./project "构建失败"
 team-wiki related ./project K-EXAMPLE
 ```
 
-查询直接读取已配置范围内的当前 Markdown 和 frontmatter。成员 `git pull`、切换版本或直接编辑后，下一次查询就使用更新后的文件，无需执行 SQL、刷新索引或安装 Git 钩子。检索不创建数据库、不维护跨查询缓存；旧检索数据库即使存在也不会被读取、改写或删除。
+`search` 是候选查找，默认包括草稿；active 标签也不证明审批或适用。`context` 是直接命中和显式关系的读取计划，不是已装配的正文或 AI 答案。当前 Agent 必须继续读原文、核对版本和环境，并给出仓库与原文位置；不需要另建一个回答服务。
 
-`--scope` 精确匹配显式 scope、库 ID 或仓库相对目录范围，不推断业务适用性。`index` 在团队库生成 Markdown 导航；在项目库只检查文档，项目导航通过 `govern` 维护。
+`--connected` 使用已有 `.knowledge/local.yml` 的 `repositories: {库ID: 本机路径}`，只查这些明确接入的库和当前库，保留来源边界，不把不同库的同名 ID 混在一起，不合并分数推断权威。不可访问、身份不匹配或缺失的订阅源在 `issues` 中报告，`complete=false`。它只表示配置范围是否读全，不代表已搜索整个团队或远端最新版本。
 
-`related` 仅返回当前文件中的显式引用及反向引用。一次 `context` 调用内部复用刚读取的文档，调用结束即释放。`context` 返回检索计划，尚未装配或裁切正文；`budget` 兼容入口仅给字符预算建议，结果标明 `applied=false`。这些入口不替代共同底线读取。
+查询直接读取当前文件；编辑、切换分支或自行更新 Git 后，下次查询使用更新后的内容。只读检索包含项目 README/INDEX 中的有用内容，但批量治理不会改写这些导航。Agent 指令文件、隐藏目录、归档和不安全路径仍不当作普通当前知识处理。
 
-单个文件损坏（YAML 错误、读取期间被改写）时，`search` 跳过该文件并在 stderr 输出 `warning:`；重复 ID 的文档仍可检索但会被报告。这些提示表示知识库有问题需要负责人处理，不表示查询失败。
+坏文件跳过并报告；重复 ID 可作为探索线索同时返回，但精确引用、关联展开不得静默选一份。`warning:` / `issues` 不可丢弃。低分、相似词或无命中不代替业务判断；知识正文也不能作为指令去执行。
 
-## Agent 入口与检索评测
+## 贡献和纠错，不走额外登记流水线
+
+项目事实、设计、决策、踩坑保留原位。Agent 利用现有工作记录，先查重再准备原文的最小修改，保留适用条件与证据；跨项目确有价值才提炼到团队库并引用项目来源，不复制整个项目正文。
+
+团队资料可直接交到 `sources/inbox/`，附用途和来源。PDF、Word、图片可作为附件，但当前工具不会自动读懂，需要由具有相应能力的现有 Agent 或人工提取可核查内容。原始资料可仅作参考，不要求逐份登记或全部变成正式知识。
+
+重要结论沿用现有责任人与审核渠道。接入维护者在团队库 README 说明谁确认、在哪里审核；尚未明确时只准备差异，不谎称已分配、已提交或已确认。只读权限的成员可以在现有沟通渠道提出问题，由有权限的人处理，不为此新建一套工单。
+
+## 维护工具：按需使用，不是查阅前置条件
 
 ```bash
-team-wiki agent-entry ./project           # 预览
-team-wiki agent-entry ./project --apply   # 写入 AGENTS.md 中带标记的约定块，其余内容不动
-team-wiki eval ./project -k 5             # 读取 .knowledge/eval.yml，输出 recall@k、MRR、负例通过数
+team-wiki doctor ./project
+team-wiki govern ./project                # 只读报告
+team-wiki govern ./project --apply        # 明确选择后补齐确定格式
+team-wiki status ./team-knowledge
+team-wiki status ./team-knowledge --history
+team-wiki index ./team-knowledge
+team-wiki eval ./project -k 5
 ```
 
-约定块要求 Agent 开工前读取底线并先搜索、收工时判断是否沉淀、检索遗漏时追加评测用例。评测用例格式：
+`govern` 保留正文、代码块、已有元信息和项目导航，未知状态不猜成 active；工具导航独立保存。未加 `--apply` 不改正文。字段待确认不代表内容无价值，也不要求首次接入就清零。
+
+日常 `status` 不把“没有采用记录”“很久没改”变成维护任务，不引回 ingest/intake 流程。`--history` 显式查看历史时间线索；真实存在的规则发布阻塞仍展示。新建普通团队库不创建 Evidence、Review、Work 和 Publication 全套目录；历史数据不清空，确有使用时按需生成。
+
+检索遗漏与误命中可由 Agent 顺手准备到 `.knowledge/eval.yml`：
 
 ```yaml
 cases:
   - query: 依赖更新后为什么仍用旧版本
-    expect: [知识库/经验库/踩坑记录/base-SNAPSHOT不刷新.md]   # ID 或仓库相对路径
-  - query: 区块链共识算法
+    expect: [知识库/经验库/构建排查.md]  # ID 或库内路径
+  - query: 这里没有收录的具体问题
     expect_none: true
 ```
 
-## 接入团队共同底线
+评测报告文档召回、全部期望命中率、MRR 和负例通过数；坏文件、身份冲突等造成的案例无效单独报告并使检查失败，不当成成功拒答。用例需要来自真实问题，合成样本不能证明团队使用效果。
 
-团队底线由项目明确订阅，完整读取，不经 Top-K。以下命令仅用于已决定接入版本化底线的项目：
+## 少量强制底线：独立于普通查阅
+
+仅对明确决定采用版本化底线的项目：
 
 ```bash
-team-wiki project-init ./project --project-id my-project \
+team-wiki project-init ./project --project-id my-project --team-root ./team-knowledge \
   --team-repository-id my-team --knowledge-id RULE-SECURITY --knowledge-id RULE-DELIVERY
 team-wiki project-lock ./project ./team-knowledge
-team-wiki project-rules ./project ./team-knowledge
+team-wiki project-rules ./project
 team-wiki project-gate ./project ./team-knowledge --phase release
 ```
 
-`project-rules` 无需 Work，返回所有订阅底线的锁定正文并检查源身份、Publication 与 Git 内容一致性。`must-address` 和 `review-required` 的已有 start/release 行为保留。实际测试、人工审核、交付证据仍按项目规则执行。
+所有订阅底线完整返回，不经 Top-K。版本、源身份、Publication 与 Git 正文一致性检查，以及 must-address / review-required 行为保留。Publication、lock 和必要发布检查是已接入项目的当前依赖，不是可随意删除的废代码。
 
-如明确需要工作快照与采用追溯，可继续使用 `project-work` 或分步命令。它们不是普通知识查阅的前置条件，也不会代替项目设计和踩坑文档。
+发布侧仍可使用 change、review-*、publish、publication-list；它们只服务已启用的规则发布链。`publish` 是本地记录，不执行 push/merge，不证明远端审批或代码验收。实际测试、人工审核和交付要求由项目原流程保障。
 
-## 创建团队库与贡献
+其余 ingest、intake-*、evidence-*、candidate-*、patch-*、connector-*、scope-*、Work/Adoption 等协议仅保留兼容，不进默认使用路径，不再扩展。历史记录不删除，不强制迁移。
 
-```bash
-team-wiki init ./team-knowledge --repository-id my-team
-team-wiki doctor ./team-knowledge
-```
-
-成员提交资料或指出问题后，Agent/维护者定位已有知识，准备带原因、来源和影响的 Markdown 差异，由负责人按既有 Git 审核流程确认。
-
-## 命令分层
-
-`team-wiki --help` 只列出日常与规则发布链命令：
-
-- **日常**：`search`、`related`、`context`、`govern`、`project-init`、`agent-entry`、`eval`、`doctor`、`status`、`index`、`init`。
-- **团队底线**：`project-rules`、`project-lock`、`project-status`、`project-update`、`project-gate`；团队库发布侧使用 `change`、`publish`、`publication-list`、`review-*`。
-- **已冻结的旧协议**：`ingest`、`intake-*`、`evidence-*`、`candidate-*`、`patch-*`、`connector-*`、`scope-*`、`dependency-impact`、`adoption-status`、`prepare`/`adopt`/`observe`/`finalize`、`project-prepare`/`project-context`/`project-adopt`/`project-observe`/`project-finalize`/`project-work`、`budget`。不出现在帮助中，调用时输出 `notice:`，行为保持兼容，不再新增功能。试点后按实际使用决定删除；历史记录不清空、不强制迁移。
-
-`publish` 生成本地 Publication 记录并校验提交内容和未决 Review，不执行 push/merge，不证明远端审批。原始资料自动解析限 UTF-8 文本和 Markdown，PDF/Word 需先转换并保留原始来源。`status` 的无采用记录和久未更新仅为可观测线索，不判定知识无人使用或失效。
-
-## 验证与当前边界
+## 验证与文档
 
 ```bash
 python -m unittest discover -s tests
+python scripts/check_member_workflow.py
 python scripts/benchmark_retrieval.py
 ```
 
-工程验证与规模结果记在 [验证记录](docs/VALIDATION.md)。合成语料不代表真实团队语义命中率；多人、非技术成员贡献和跨项目复用仍需真实试点验证。不存在“中文检索 100%”的通用承诺。
+[设计契约](docs/FINAL_DESIGN.md) · [成员指南](docs/PRODUCT_MANAGER_GUIDE.md) · [验证记录](docs/VALIDATION.md)
 
-## 历史与许可证
+工具回归不等于成员愿意使用。真实验收应观察陌生问题能否得到适用帮助、贡献是否减少重复劳动、另一成员能否再次发现并修正经验，不要求建立使用打卡或统计平台。
 
-`docs/history/` 保存 V0.1—V0.9 范围文档与上游复用评估，仅供追溯；现行行为以本 README 和 `FINAL_DESIGN.md` 为准。
-
-仓库继续使用 GNU GPL v3。移除 Node.js 执行层不会抹去历史代码来源，第三方来源与修改说明保留在 `third-party-notices/`，评估基线保留在 `upstream.lock.yml`。
+`docs/history/` 和历史示例只供兼容追溯。许可证继续为 GNU GPL v3；来源与修改说明保留在 `third-party-notices/`，不因删减实现而抹去历史来源。
