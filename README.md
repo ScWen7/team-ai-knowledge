@@ -73,6 +73,17 @@ team-wiki publish . <change-id> <knowledge-id> --requirement review-required
 
 需要逐块精细控制时仍可用 `intake-apply`；需要显式审阅 Candidate 时仍可用 `candidate-create` / `patch-plan`。
 
+## 查找知识
+
+```bash
+team-wiki search . "手机号能不能为空"
+team-wiki context . "重复导入会怎么样"     # 检索 + 关系扩展 + 上下文预算
+team-wiki related . RULE-CONTACT-PHONE      # 按关系图找相关知识
+```
+
+中文可直接用整句提问，无需自行分词。`search` 静默返回空列表是故障信号，
+不是「知识不存在」的证据。
+
 ## 内容
 
 - `docs/FINAL_DESIGN.md`：最终统一设计与建设指引
@@ -216,6 +227,8 @@ V0.8 不增加业务对象，只削减使用路径：
 
 - `intake-decide`：一次调用决定整份 intake，逐块声明从 O(块数) 降到 O(1)；
 - 移除恒为假的 `indexing` 状态维度（LanceDB 未实现，字段永远为 `not-indexed`）；
+- **修复中文检索**：原实现只按空白切词，中文自然语言提问命中率 0%；
+  改为字符 n-gram + 字段加权后恢复到 100%，且无关提问仍干净拒绝；
 - `patch-plan-direct`：Candidate 降级为实现细节，内部记录与门禁完全不变；
 - `project-work`：项目侧 5 步收敛为 2 步，所有门禁照常执行；
 - `status`：把已有信号汇总成带原因和下一步命令的待决策清单；

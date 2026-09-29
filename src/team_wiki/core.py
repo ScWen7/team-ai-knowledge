@@ -428,20 +428,83 @@ def prepare_work(root: Path, goal: str, consumer_id: str | None = None) -> Path:
     return path
 
 
+LATIN_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+QUERY_PUNCT_RE = re.compile(r"[\s，。、；：？！,.;:?!()（）\[\]【】\"'“”‘’/\\|~`@#$%^&*+=<>~-]+")
+FIELD_WEIGHTS = {"title": 6, "summary": 3, "tags": 4, "body": 1}
+
+
+def _cjk_ngrams(text: str, sizes: tuple[int, ...] = (2, 3)) -> list[str]:
+    """Character n-grams for CJK runs.
+
+    Chinese has no spaces, so whitespace tokenisation turns a whole question
+    into a single term and never matches any body text. Character bigrams
+    bridge that gap without a dictionary or a model: "手机号能不能为空" shares
+    手机号 / 必填-style substrings with a rule that says 手机号为必填项.
+    """
+    grams: list[str] = []
+    for match in re.finditer(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+", text):
+        run = match.group(0)
+        for size in sizes:
+            if len(run) < size:
+                continue
+            grams.extend(run[i : i + size] for i in range(len(run) - size + 1))
+    return grams
+
+
+def tokenize_query(query: str) -> list[str]:
+    """Split a query into comparable terms.
+
+    Latin/digit runs stay whole words (so ``idempotent`` still matches
+    ``idempotent``), CJK runs become character n-grams, and the original
+    whitespace-separated terms are kept so an exact phrase still scores.
+    """
+    cleaned = QUERY_PUNCT_RE.sub(" ", query.strip().lower())
+    terms: list[str] = []
+    for chunk in cleaned.split():
+        terms.append(chunk)
+        for match in LATIN_TOKEN_RE.finditer(chunk):
+            terms.append(match.group(0))
+        terms.extend(_cjk_ngrams(chunk))
+    return [t for t in dict.fromkeys(terms) if t]
+
+
+def _knowledge_fields(meta: dict[str, Any], body: str) -> dict[str, str]:
+    return {
+        "title": str(meta.get("title", "")),
+        "summary": str(meta.get("summary", "")),
+        "tags": " ".join(map(str, meta.get("tags", []) or [])),
+        "body": body,
+    }
+
+
 def search(root: Path, query: str) -> list[dict[str, Any]]:
-    terms = [x.lower() for x in re.split(r"\s+", query.strip()) if x]
+    """Rank knowledge entries against a free-form query.
+
+    Works for Chinese without a tokenizer: CJK runs are expanded into
+    character n-grams, so a natural-language question matches knowledge whose
+    wording differs but whose characters overlap. Latin identifiers still
+    match exactly. Field-weighted so a title hit outranks a body mention.
+    """
+    terms = tokenize_query(query)
+    if not terms:
+        return []
     results = []
     for path in iter_knowledge_files(root):
         meta, body = parse_frontmatter(path)
-        hay = " ".join(
-            [
-                str(meta.get("title", "")),
-                str(meta.get("summary", "")),
-                " ".join(map(str, meta.get("tags", []) or [])),
-                body,
-            ]
-        ).lower()
-        score = sum(hay.count(t) for t in terms)
+        fields = {k: v.lower() for k, v in _knowledge_fields(meta, body).items()}
+        score = 0
+        for term in terms:
+            weight = FIELD_WEIGHTS["body"]
+            if term in fields["title"]:
+                weight = FIELD_WEIGHTS["title"]
+            elif term in fields["tags"]:
+                weight = FIELD_WEIGHTS["tags"]
+            elif term in fields["summary"]:
+                weight = FIELD_WEIGHTS["summary"]
+            hits = sum(fields[k].count(term) for k in fields)
+            if hits:
+                # Longer n-grams are stronger evidence than their sub-bigrams.
+                score += hits * weight * len(term)
         if score:
             results.append(
                 {
