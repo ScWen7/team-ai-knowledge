@@ -42,6 +42,7 @@ from .intake import apply_disposition, audit_intake, decide_intake, intake_sourc
 from .node_core import context_budget
 from .review import list_reviews, resolve_review, upsert_review
 from .scope import SourceScope, SourceScopeError
+from .status import build_status_report, format_status_report
 
 
 def dump(value):
@@ -53,6 +54,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     x = sub.add_parser("init"); x.add_argument("root"); x.add_argument("--repository-id")
+    x = sub.add_parser("status"); x.add_argument("root"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60); x.add_argument("--review-days", type=int, default=14); x.add_argument("--inbox-limit", type=int, default=3)
     x = sub.add_parser("doctor"); x.add_argument("root"); x.add_argument("--report", choices=["default", "stale"], default="default"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60)
     x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true"); x.add_argument("--connector", default="manual"); x.add_argument("--upstream-id"); x.add_argument("--logical-path")
     x = sub.add_parser("refresh-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("file"); x.add_argument("--owner", default="unassigned")
@@ -123,6 +125,22 @@ def main():
     root = Path(a.root).resolve()
     try:
         if a.cmd == "init": init_team(root, a.repository_id); index_workspace(root); print(root)
+        elif a.cmd == "status":
+            report = build_status_report(
+                root,
+                zero_adoption_days=a.zero_adoption_days,
+                stale_active_days=a.stale_active_days,
+                draft_days=a.draft_days,
+                review_days=a.review_days,
+                inbox_limit=a.inbox_limit,
+            )
+            print(format_status_report(report))
+            dump({
+                "total": len(report.decisions),
+                "blocking_count": len(report.blocking),
+                "attention_count": len(report.attention),
+                "decisions": [d.as_dict() for d in report.decisions],
+            })
         elif a.cmd == "doctor":
             if a.report == "stale":
                 report = build_stale_report(

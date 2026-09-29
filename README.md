@@ -8,7 +8,7 @@
 |---|---|---|
 | **产品经理 / 知识读者** | 看知识、交资料、提建议 | 浏览器打开仓库 → [`docs/PRODUCT_MANAGER_GUIDE.md`](docs/PRODUCT_MANAGER_GUIDE.md) |
 | **工程师 / 知识使用者** | 在项目里消费团队知识 | 下方"工程师高频 2 命令" |
-| **知识管理员 / 工具维护者** | 登记资料、审 CHG、发布、治理 | [`docs/FINAL_DESIGN.md`](docs/FINAL_DESIGN.md) |
+| **知识管理员 / 工具维护者** | 登记资料、审 CHG、发布、治理 | `team-wiki status .` 看今天该做什么 |
 
 ## 工程师高频 2 命令（V0.8 起）
 
@@ -32,6 +32,15 @@ team-wiki project-work . <team-root> --phase finish \
 > `project-prepare / project-context / project-adopt / project-observe / project-finalize`。
 
 其他命令（`init / ingest / publish / doctor / connector / review / batch / patch-*` 等）属于**知识管理员路径**，普通工程师不需要掌握。
+
+## 知识管理员：今天该做什么
+
+```bash
+team-wiki status .
+```
+
+输出一份待决策清单：哪些变更被 Review 阻塞、哪些知识发布后没人用、哪些规则长期没更新、
+哪些资料堆在 inbox 里没登记——每一项都带原因和可直接执行的下一步命令。
 
 ## 知识管理员常用路径
 
@@ -144,7 +153,7 @@ V0.4 引入 Evidence Layer：
 - 人工纠正不覆盖 parser output；
 - Evidence 可以绑定 candidate / knowledge / change / review；
 - 来源更新影响分析同时使用 frontmatter source 引用和 evidence binding；
-- source-status 区分 acquisition / processing / evidence / indexing / knowledge-change。
+- source-status 区分 acquisition / processing / evidence / knowledge-change（V0.8 起不再输出恒假的 indexing 维度）。
 
 WeKnora 作为来源/证据处理的设计参考，不作为第三个必须运行的平台。详见 `docs/V0.4_SCOPE.md`。
 
@@ -209,6 +218,7 @@ V0.8 不增加业务对象，只削减使用路径：
 - 移除恒为假的 `indexing` 状态维度（LanceDB 未实现，字段永远为 `not-indexed`）；
 - `patch-plan-direct`：Candidate 降级为实现细节，内部记录与门禁完全不变；
 - `project-work`：项目侧 5 步收敛为 2 步，所有门禁照常执行；
+- `status`：把已有信号汇总成带原因和下一步命令的待决策清单；
 - Candidate Batch 标记为实验性，移出主推荐路径；
 - 修复 macOS 临时目录下 `patch-apply` 的路径崩溃。
 
