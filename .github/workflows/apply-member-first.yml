@@ -1,0 +1,46 @@
+name: one-off-member-first-transfer
+
+on:
+  push:
+    branches: [fix/member-first-complete]
+    paths:
+      - '.maintenance/**'
+      - '.github/workflows/apply-member-first.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-export-tree:
+    if: github.repository == 'ScWen7/team-ai-knowledge' && github.ref == 'refs/heads/fix/member-first-complete'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Reconstruct exact tested files
+        run: python .maintenance/apply-member-first.py apply
+      - name: Install in virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e .
+      - name: Regression tests
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Synthetic member workflow
+        run: .venv/bin/python scripts/check_member_workflow.py
+      - name: Whitespace check
+        run: git diff --check
+      - name: Export verified Git tree only
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .maintenance/apply-member-first.py upload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: member-first-result
+          path: /tmp/member-first-result.json
+          retention-days: 3
