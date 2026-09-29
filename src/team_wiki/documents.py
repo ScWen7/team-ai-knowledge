@@ -241,7 +241,7 @@ def _scope_entries(
     if configured is None:
         configured = [
             name
-            for name in ("docs", "doc", "knowledge", "knowledge-base", "文档", "知识库")
+            for name in ("docs", "doc", "knowledge", "knowledge-base", "文档", "知识库", "README.md")
             if (resolved_root / name).exists() or (resolved_root / name).is_symlink()
         ]
 
@@ -298,13 +298,14 @@ def document_roots(root: Path, paths: list[str] | None = None) -> list[str]:
     return [rel for rel, _ in entries]
 
 
-def _excluded_rel(rel: str) -> bool:
+def _excluded_rel(rel: str, *, for_retrieval: bool = False) -> bool:
     pure = PurePosixPath(rel)
     if any(part.startswith(".") for part in pure.parts):
         return True
     if any(part.casefold() in _EXCLUDED_DIRS for part in pure.parts[:-1]):
         return True
-    if pure.name.casefold() in _NAVIGATION_NAMES:
+    excluded_names = {"agents.md", "claude.md"} if for_retrieval else _NAVIGATION_NAMES
+    if pure.name.casefold() in excluded_names:
         return True
     return pure.suffix.lower() not in {".md", ".markdown"}
 
@@ -312,13 +313,14 @@ def _excluded_rel(rel: str) -> bool:
 def _scan_entries(
     root: Path,
     entries: list[tuple[str, Path]],
+    *, for_retrieval: bool = False,
 ) -> tuple[list[Path], list[dict[str, Any]]]:
     files: list[Path] = []
     issues: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     def add_file(rel: str, path: Path) -> None:
-        if _excluded_rel(rel) or rel in seen:
+        if _excluded_rel(rel, for_retrieval=for_retrieval) or rel in seen:
             return
         try:
             if path.is_symlink():
@@ -414,16 +416,23 @@ def _scan_entries(
     return files, issues
 
 
-def iter_document_files(root: Path, paths: list[str] | None = None) -> list[Path]:
-    """List safe Markdown body files without following links or navigation files."""
+def document_files_report(root: Path, paths: list[str] | None = None, *,
+                          for_retrieval: bool = False) -> tuple[list[Path], list[dict[str, Any]]]:
+    """List authorized files and report omissions without reading outside the scope."""
     supplied_root = Path(root)
     resolved_root = supplied_root.resolve(strict=False)
     entries, scope_issues = _scope_entries(supplied_root, paths)
-    files, scan_issues = _scan_entries(resolved_root, entries)
-    blocking = [item for item in (*scope_issues, *scan_issues) if item.get("blocking")]
+    files, scan_issues = _scan_entries(resolved_root, entries, for_retrieval=for_retrieval)
+    return [supplied_root / item.relative_to(resolved_root) for item in files], [*scope_issues, *scan_issues]
+
+
+def iter_document_files(root: Path, paths: list[str] | None = None) -> list[Path]:
+    """Governance excludes navigation; retrieval opts into a separate read scope."""
+    files, issues = document_files_report(root, paths)
+    blocking = [item for item in issues if item.get("blocking")]
     if blocking:
         raise ValueError("; ".join(item["message"] for item in blocking))
-    return [supplied_root / item.relative_to(resolved_root) for item in files]
+    return files
 
 
 def _extract_frontmatter(raw: bytes) -> tuple[dict[str, Any], str, re.Match[str] | None]:

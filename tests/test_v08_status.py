@@ -217,13 +217,15 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
             path = self._knowledge(root, "K-OLD", "active")
             now = _age_file(path, "updated_at", 200)
 
-            item = self._find(root, "stale-knowledge", now=datetime.fromisoformat(now))
+            self.assertIsNone(self._find(root, "stale-knowledge", now=datetime.fromisoformat(now)))
+            item = self._find(root, "stale-knowledge", now=datetime.fromisoformat(now), include_history=True)
 
             self.assertIsNotNone(item)
             self.assertEqual(item.severity, "attention")
             self.assertIn("K-OLD", item.title)
             self.assertIn("复核线索", item.detail)
-            self.assertTrue(any("evidence-bindings" in a for a in item.actions))
+            self.assertTrue(any("search" in a for a in item.actions))
+            self.assertFalse(any("evidence-bindings" in a for a in item.actions))
             self.assertFalse(any("--comparison narrows" in a for a in item.actions))
 
     def test_long_draft_is_reported(self):
@@ -232,12 +234,14 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
             path = self._knowledge(root, "K-DRAFT", "draft")
             now = _age_file(path, "updated_at", 200)
 
-            item = self._find(root, "long-draft", now=datetime.fromisoformat(now))
+            self.assertIsNone(self._find(root, "long-draft", now=datetime.fromisoformat(now)))
+            item = self._find(root, "long-draft", now=datetime.fromisoformat(now), include_history=True)
 
             self.assertIsNotNone(item)
             self.assertIn("K-DRAFT", item.title)
             self.assertIn("核对来源", item.detail)
-            self.assertTrue(any("evidence-bindings" in a for a in item.actions))
+            self.assertTrue(any("search" in a for a in item.actions))
+            self.assertFalse(any("evidence-bindings" in a for a in item.actions))
             self.assertFalse(any("--comparison adds" in a for a in item.actions))
             self.assertFalse(any("deprecated" in a for a in item.actions))
 
@@ -271,13 +275,15 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
                     yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
                 )
 
-            item = self._find(root, "zero-adoption", now=datetime.now(timezone.utc))
+            self.assertIsNone(self._find(root, "zero-adoption", now=datetime.now(timezone.utc)))
+            item = self._find(root, "zero-adoption", now=datetime.now(timezone.utc), include_history=True)
 
             self.assertIsNotNone(item)
             self.assertIn("K-PUB", item.title)
             self.assertNotIn("无人使用", item.title + item.detail)
             self.assertIn("不代表没有实际使用", item.detail)
-            self.assertTrue(any("adoption-status" in a for a in item.actions))
+            self.assertTrue(any("search" in a for a in item.actions))
+            self.assertFalse(any("adoption-status" in a for a in item.actions))
             stale_text = format_stale_report(
                 build_stale_report(root, now=datetime.now(timezone.utc))
             )
@@ -296,7 +302,8 @@ updated_at: {datetime.now(timezone.utc).isoformat()}
 
             self.assertIsNotNone(item)
             self.assertIn("5", item.title)
-            self.assertTrue(any("ingest" in a for a in item.actions))
+            self.assertTrue(any("Agent" in a for a in item.actions))
+            self.assertFalse(any("ingest" in a or "intake" in a for a in item.actions))
 
     def test_small_inbox_is_not_flagged(self):
         with TemporaryDirectory() as td:
