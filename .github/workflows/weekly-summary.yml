@@ -1,0 +1,71 @@
+name: weekly-knowledge-summary
+
+on:
+  schedule:
+    # 每周一 09:00 UTC (北京时间 17:00)
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect last-7-day changes
+        id: stats
+        run: |
+          SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          {
+            echo "since=$SINCE"
+            echo "wiki_changes<<EOF"
+            git log --since="$SINCE" --name-only --pretty=format:'--- %h %s (%an, %ad)' --date=short -- 'wiki/**.md' | head -200
+            echo "EOF"
+            echo "chg_changes<<EOF"
+            git log --since="$SINCE" --name-only --pretty=format:'--- %h %s (%an, %ad)' --date=short -- 'changes/**.md' | head -200
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create weekly summary issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const since = process.env.SINCE || '${{ steps.stats.outputs.since }}';
+            const wiki = `${{ steps.stats.outputs.wiki_changes }}`.trim();
+            const chg  = `${{ steps.stats.outputs.chg_changes }}`.trim();
+            const body = [
+              `# 本周团队知识库动态（${new Date().toISOString().slice(0,10)}）`,
+              '',
+              `统计区间：最近 7 天（自 ${since}）`,
+              '',
+              '## wiki/ 变更',
+              '',
+              wiki ? '```\n' + wiki + '\n```' : '_本周无变更_',
+              '',
+              '## changes/ 变更',
+              '',
+              chg ? '```\n' + chg + '\n```' : '_本周无变更_',
+              '',
+              '## 快速入口',
+              '',
+              '- [最近发布的知识](changes/views/recently-published.md)',
+              '- [进行中的变更](changes/views/open.md)',
+              '- [被阻塞的变更](changes/views/blocked.md)',
+              '',
+              '---',
+              '本 issue 由 GitHub Actions 每周一自动生成，可直接关闭。',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[周报] 团队知识库 ${new Date().toISOString().slice(0,10)}`,
+              body,
+              labels: ['knowledge-weekly'],
+            });

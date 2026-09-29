@@ -1,0 +1,61 @@
+name: wiki-direct-edit-triage
+
+on:
+  pull_request:
+    paths:
+      - 'wiki/**/*.md'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comment on direct wiki edits
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const wikiFiles = files
+              .filter(f => f.filename.startsWith('wiki/') && f.filename.endsWith('.md'))
+              .filter(f => !f.filename.endsWith('INDEX.md'));
+            if (wikiFiles.length === 0) return;
+
+            const isSuggestion = pr.title.startsWith('[知识建议]');
+            const list = wikiFiles.map(f => `- \`${f.filename}\` (${f.status})`).join('\n');
+
+            const body = [
+              `检测到本 PR 直接修改了 ${wikiFiles.length} 个 wiki 知识文件：`,
+              '',
+              list,
+              '',
+              isSuggestion
+                ? '✅ 已识别为"知识建议"PR，将触发知识变更（CHG）流程。'
+                : '⚠️ 建议将 PR 标题前缀改为 `[知识建议]`，明确这是对团队知识的修改建议。',
+              '',
+              '## 接下来的流程',
+              '',
+              '1. 知识 owner 会被自动提醒审核',
+              '2. 审核通过后，工程师会执行 `team-wiki change` 创建正式 CHG',
+              '3. CHG 经 Review 后进入发布流程',
+              '4. 正式发布前，本 PR **不应直接合并到 main**（正式发布会通过 `team-wiki publish` 完成）',
+              '',
+              '## 如果你是作者',
+              '',
+              '- 在 PR 描述里说明：为什么改、依据是什么、影响哪些范围',
+              '- 如果涉及业务规则变更，最好附来源（文档 / 会议记录 / 决策链接）',
+              '',
+              '---',
+              '这是一条由 GitHub Actions 自动发送的提醒。',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pr.number, body,
+            });

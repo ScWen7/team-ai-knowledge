@@ -17,6 +17,7 @@ from .core import (
     related,
     search,
 )
+from .stale import build_stale_report, format_stale_report
 from .impact import refresh_source
 from .candidate import apply_patch_plan, candidate_context, create_candidate, create_patch_plan, patch_plan_context
 from .batch import batch_context, create_candidate_batch
@@ -51,7 +52,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     x = sub.add_parser("init"); x.add_argument("root"); x.add_argument("--repository-id")
-    x = sub.add_parser("doctor"); x.add_argument("root")
+    x = sub.add_parser("doctor"); x.add_argument("root"); x.add_argument("--report", choices=["default", "stale"], default="default"); x.add_argument("--zero-adoption-days", type=int, default=90); x.add_argument("--stale-active-days", type=int, default=180); x.add_argument("--draft-days", type=int, default=60)
     x = sub.add_parser("ingest"); x.add_argument("root"); x.add_argument("file"); x.add_argument("--title"); x.add_argument("--move", action="store_true"); x.add_argument("--connector", default="manual"); x.add_argument("--upstream-id"); x.add_argument("--logical-path")
     x = sub.add_parser("refresh-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("file"); x.add_argument("--owner", default="unassigned")
     x = sub.add_parser("source-status"); x.add_argument("root"); x.add_argument("source_id")
@@ -119,6 +120,21 @@ def main():
     try:
         if a.cmd == "init": init_team(root, a.repository_id); index_workspace(root); print(root)
         elif a.cmd == "doctor":
+            if a.report == "stale":
+                report = build_stale_report(
+                    root,
+                    zero_adoption_days=a.zero_adoption_days,
+                    stale_active_days=a.stale_active_days,
+                    draft_days=a.draft_days,
+                )
+                print(format_stale_report(report))
+                dump({
+                    "zero_adoption_publications": report.zero_adoption_publications,
+                    "stale_active_knowledge": report.stale_active_knowledge,
+                    "long_lived_drafts": report.long_lived_drafts,
+                    "total": report.total,
+                })
+                raise SystemExit(0)
             r = doctor(root); dump({"ok": r.ok, "errors": r.errors, "warnings": r.warnings}); raise SystemExit(0 if r.ok else 1)
         elif a.cmd == "ingest": print(register_source(root, Path(a.file).resolve(), a.title, a.move, connector_id=a.connector, upstream_id=a.upstream_id, logical_path=a.logical_path)); index_workspace(root)
         elif a.cmd == "refresh-source": dump(refresh_source(root, a.source_id, Path(a.file).resolve(), owner=a.owner))
