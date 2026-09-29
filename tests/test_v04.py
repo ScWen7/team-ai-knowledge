@@ -191,7 +191,7 @@ evidence: []
             self.assertEqual(status["acquisition"]["state"], "acquired")
             self.assertEqual(status["processing"]["state"], "completed")
             self.assertEqual(status["evidence"]["state"], "ready")
-            self.assertEqual(status["indexing"]["state"], "not-indexed")
+            self.assertNotIn("indexing", status)
 
             v2 = Path(td) / "policy-v2.md"
             v2.write_text("# 规则\\n第二版规则，增加条件。", encoding="utf-8")

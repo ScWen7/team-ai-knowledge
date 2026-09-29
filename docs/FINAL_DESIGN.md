@@ -651,10 +651,15 @@ evidence chunk
 来源处理至少区分：
 
 ```text
-acquired → processed → evidence ready → indexed → compiled → published
+acquired → processed → evidence ready → compiled → published
 ```
 
-当前实现阶段可以缺失，但不能把前一阶段成功冒充后一阶段成功。索引失败不必阻断基于原文 Evidence 的知识编译；向量可查询也不代表知识已经发布。
+当前实现阶段可以缺失，但不能把前一阶段成功冒充后一阶段成功。向量可查询也不代表知识已经发布。
+
+> V0.8 调整：原设计中的 `indexed` 阶段对应尚未实现的本地派生检索层（见 §16 LanceDB）。
+> 由于没有任何代码会写入索引完成状态，保留该维度只会输出恒为假的字段，
+> 因此实现层将来源处理收敛为 acquisition / processing / evidence / knowledge_change 四段。
+> 未来启用真实向量索引时，应重新引入**可写**的索引状态，而不是恢复一个恒假字段。详见 `docs/V0.8_SCOPE.md`。
 
 ### 21.7 WeKnora 的采用边界
 
@@ -686,6 +691,10 @@ new / adds / narrows / contradicts / duplicates
 ```
 
 程序不根据相似度、引用次数或 LLM 输出自行决定该关系。
+
+> V0.8 调整：Candidate 保留为**实现细节**。`patch-plan-direct` 会在内部生成同样的 Candidate
+> 记录并执行同样的证据绑定与前置校验，使用者无需先创建或理解 Candidate 对象。
+> 显式 `candidate-create` / `candidate-show` 仍然保留。详见 `docs/V0.8_SCOPE.md`。
 
 ### 22.2 Patch Plan 将语义判断转换为可验证写入
 
@@ -782,6 +791,9 @@ V0.6 将 V0.5 的单一 Candidate/Patch Plan 扩展成完整的团队复用链�
 ### 23.1 Batch 是工作产物，不是新的正式知识层
 
 Candidate Batch 只用于把同一 proposed knowledge 的多个 Candidate 放到一起处理。它不会自动决定结论，merged statement 仍由当前 Agent/领域责任人明确。
+
+> **实验性**：该能力目前无已知真实使用。单来源修改一律走 `patch-plan-direct`；
+> Batch 保留代码与命令但不在主推荐路径上。详见 `docs/V0.8_SCOPE.md`。
 
 程序负责：
 

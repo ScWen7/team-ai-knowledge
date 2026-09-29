@@ -1,9 +1,12 @@
 """Multi-source candidate aggregation without automatic semantic inference.
 
-A batch is a work artifact. The current Agent/domain owner supplies the merged
-statement. Deterministic code verifies candidate compatibility, carries forward
-all evidence bindings, records conflicts in evidence relations, and creates one
-merged Candidate that can use the existing Patch Plan workflow.
+EXPERIMENTAL: this module is retained for the multi-source merge scenario but
+has no known real usage in the pilot. It is not part of the main documentation
+path. Prefer ``candidate.plan_patch`` / ``patch-plan-direct`` for single-source
+changes. A batch is a work artifact: the current Agent/domain owner supplies
+the merged statement. Deterministic code verifies candidate compatibility,
+carries forward all evidence bindings, records conflicts in evidence relations,
+and creates one merged Candidate that can use the existing Patch Plan workflow.
 """
 from __future__ import annotations
 

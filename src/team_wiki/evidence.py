@@ -76,7 +76,6 @@ def read_evidence(root: Path, evidence_id: str, *, corrected: bool = True) -> di
         "current_sha256": current_sha,
         "current_text": current_text,
         "correction_ids": [x["correction_id"] for x in corrections],
-        "index_state": row.get("index_state", "not-indexed"),
         "intake_id": manifest["intake_id"],
     }
 

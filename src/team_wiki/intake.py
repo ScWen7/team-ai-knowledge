@@ -224,7 +224,6 @@ def intake_source(root: Path, source_id: str, *, max_chars: int = 4000) -> Path:
                 "source_id": source_id,
                 "source_revision": digest,
                 "processing_id": processing_id,
-                "index_state": "not-indexed",
                 "locator": {
                     "logical_path": logical_path,
                     "heading_path": list(chunk.heading_path),
@@ -361,6 +360,81 @@ def apply_disposition(
     return ledger
 
 
+DEFAULT_SKIP_NOTE = "未在本次 intake-decide 中显式保留，默认不纳入本次变更"
+
+
+def decide_intake(
+    root: Path,
+    intake_id: str,
+    *,
+    keep: list[str] | None = None,
+    keep_evidence: list[str] | None = None,
+    knowledge: dict[str, list[str]] | None = None,
+    skip_rest: bool = True,
+    skip_note: str = DEFAULT_SKIP_NOTE,
+    reset: bool = False,
+) -> dict[str, Any]:
+    """Decide the whole intake in one call.
+
+    Chunks named in ``keep``/``keep_evidence`` become ``integrated``; every
+    other chunk becomes ``skipped`` with an explicit reason. Per-chunk
+    ``apply_disposition`` remains available for fine-grained control, but the
+    common "keep a few chunks" case no longer costs one command per chunk.
+    """
+    path = root / ".knowledge/records/intake" / intake_id / "review-progress.yml"
+    if not path.is_file():
+        raise KeyError(f"intake id not found: {intake_id}")
+    ledger = read_yaml(path)
+    chunks = list(ledger.get("chunks", []))
+    by_id = {str(row.get("id")): row for row in chunks}
+    by_evidence = {str(row.get("evidence_id")): row for row in chunks}
+
+    wanted: dict[str, list[str]] = {}
+    for key in [*(keep or []), *(keep_evidence or [])]:
+        row = by_id.get(str(key)) or by_evidence.get(str(key))
+        if row is None:
+            raise KeyError(f"chunk id or evidence id not found: {key}")
+        wanted[str(row["id"])] = []
+
+    for chunk_id, ids in (knowledge or {}).items():
+        row = by_id.get(str(chunk_id)) or by_evidence.get(str(chunk_id))
+        if row is None:
+            raise KeyError(f"chunk id or evidence id not found: {chunk_id}")
+        wanted[str(row["id"])] = list(dict.fromkeys(ids))
+
+    if not wanted and not reset:
+        raise ValueError(
+            "intake-decide requires at least one --keep/--keep-evidence chunk, "
+            "or --reset to return every chunk to pending"
+        )
+
+    for row in chunks:
+        chunk_id = str(row.get("id"))
+        if reset:
+            row["status"] = "pending"
+            row["note"] = None
+            row["knowledge_ids"] = []
+            continue
+        if chunk_id in wanted:
+            row["status"] = "integrated"
+            row["note"] = None
+            row["knowledge_ids"] = list(dict.fromkeys(wanted[chunk_id]))
+        elif skip_rest and row.get("status") == "pending":
+            row["status"] = "skipped"
+            row["note"] = skip_note
+
+    counts = {name: 0 for name in CHUNK_STATES}
+    for item in chunks:
+        state = str(item.get("status", "pending"))
+        counts[state] = counts.get(state, 0) + 1
+    ledger["chunks"] = chunks
+    ledger["summary"] = {"total": len(chunks), **counts}
+    ledger["review_status"] = "complete" if counts.get("pending", 0) == 0 else "in-progress"
+    ledger["updated"] = utc_now()
+    write_yaml(path, ledger)
+    return ledger
+
+
 def audit_intake(root: Path, intake_id: str) -> dict[str, Any]:
     ledger = intake_status(root, intake_id)
     pending = [x["id"] for x in ledger.get("chunks", []) if x.get("status") == "pending"]
@@ -393,7 +467,6 @@ def source_pipeline_status(root: Path, source_id: str) -> dict[str, Any]:
         },
         "processing": {"state": "not-started"},
         "evidence": {"state": "not-ready", "count": 0},
-        "indexing": {"state": "not-configured", "counts": {}},
         "knowledge_change": {
             "state": "linked" if source.get("linked_changes") else "none",
             "change_ids": source.get("linked_changes") or [],
@@ -422,14 +495,6 @@ def source_pipeline_status(root: Path, source_id: str) -> dict[str, Any]:
             "state": "ready" if chunks else "not-ready",
             "count": len(chunks),
             "source_revision": manifest.get("source_revision"),
-        }
-        counts: dict[str, int] = {}
-        for row in chunks:
-            state = row.get("index_state", "unknown")
-            counts[state] = counts.get(state, 0) + 1
-        result["indexing"] = {
-            "state": "ready" if counts and all(k == "indexed" for k in counts) else "not-indexed",
-            "counts": counts,
         }
     if ledger_path.is_file():
         ledger = read_yaml(ledger_path)

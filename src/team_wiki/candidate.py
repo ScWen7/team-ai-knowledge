@@ -9,6 +9,7 @@ safely applies an Agent-produced full Markdown revision.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from .core import (
     utc_now,
     write_yaml,
 )
-from .evidence import list_bindings, read_evidence
+from .evidence import bind_evidence, list_bindings, read_evidence
 from .review import upsert_review
 from .dependency import open_dependency_review
 
@@ -124,6 +125,14 @@ def _safe_wiki_target(root: Path, relative_path: str) -> Path:
     if target.suffix.lower() != ".md":
         raise ValueError("patch plan target must be a Markdown file")
     return target
+
+
+def _repo_relative(root: Path, path: Path) -> str:
+    """Relative path that survives symlinked temp dirs (e.g. macOS /var -> /private/var)."""
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(Path(os.path.relpath(path.resolve(), root.resolve())))
 
 
 def create_patch_plan(
@@ -273,6 +282,81 @@ def create_patch_plan(
     return path
 
 
+def plan_patch(
+    root: Path,
+    *,
+    knowledge_id: str,
+    comparison: str,
+    summary: str,
+    statement: str,
+    title: str | None = None,
+    knowledge_type: str = "rule",
+    evidence_ids: list[str] | None = None,
+    owner: str = "unassigned",
+    scope: str = "team",
+    target_path: str | None = None,
+) -> dict[str, Any]:
+    """Create a Patch Plan in one call, without a separate Candidate step.
+
+    This is the low-friction path for "this knowledge is wrong / needs
+    narrowing". It creates the same Candidate record under the hood so the
+    on-disk contract and every downstream check stay identical; the only
+    thing removed is the need to understand the Candidate object.
+
+    The semantic decision (``comparison``) is still supplied by the caller.
+    Deterministic code never infers it.
+    """
+    if not statement.strip():
+        raise ValueError("candidate statement is required")
+    if not evidence_ids:
+        raise ValueError("at least one evidence id is required")
+
+    try:
+        _path, meta, _digest = knowledge_ref(root, knowledge_id)
+        proposed_id = knowledge_id
+        resolved_title = title or str(meta.get("title") or knowledge_id)
+        resolved_type = str(meta.get("type") or knowledge_type)
+    except KeyError:
+        if comparison != "new":
+            raise
+        proposed_id = knowledge_id
+        resolved_title = title or knowledge_id
+        resolved_type = knowledge_type
+
+    candidate_file = create_candidate(
+        root,
+        proposed_id=proposed_id,
+        title=resolved_title,
+        knowledge_type=resolved_type,
+        statement=statement,
+        owner=owner,
+        scope=scope,
+    )
+    candidate_id = str(read_yaml(candidate_file)["candidate_id"])
+
+    for evidence_id in dict.fromkeys(evidence_ids):
+        bind_evidence(
+            root,
+            evidence_id,
+            target_kind="candidate",
+            target_id=candidate_id,
+            relation="supports",
+            note="",
+        )
+
+    plan_file = create_patch_plan(
+        root,
+        candidate_id,
+        comparison=comparison,
+        summary=summary,
+        owner=owner,
+        target_knowledge_id=None if comparison == "new" else knowledge_id,
+        target_path=target_path,
+    )
+    plan = read_yaml(plan_file)
+    return {"plan_id": plan["plan_id"], "candidate_id": candidate_id, "plan": plan}
+
+
 def _stale_evidence(root: Path, plan: dict[str, Any]) -> list[dict[str, str]]:
     stale: list[dict[str, str]] = []
     for item in plan.get("evidence", []) or []:
@@ -371,7 +455,7 @@ def apply_patch_plan(root: Path, plan_id: str, content_file: Path) -> Path:
     plan["dependency_review_id"] = dependency_review_id
     plan["applied"] = {
         "at": utc_now(),
-        "path": str(target.relative_to(root)),
+        "path": _repo_relative(root, target),
         "content_sha256": applied_sha,
     }
     write_yaml(path, plan)
@@ -398,4 +482,4 @@ def apply_patch_plan(root: Path, plan_id: str, content_file: Path) -> Path:
                 "dependency_impact": dependency_impact,
             })
     index_workspace(root)
-    return target
+    return root / _repo_relative(root, target)

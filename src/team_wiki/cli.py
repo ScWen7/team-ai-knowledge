@@ -19,7 +19,7 @@ from .core import (
 )
 from .stale import build_stale_report, format_stale_report
 from .impact import refresh_source
-from .candidate import apply_patch_plan, candidate_context, create_candidate, create_patch_plan, patch_plan_context
+from .candidate import apply_patch_plan, candidate_context, create_candidate, create_patch_plan, patch_plan_context, plan_patch
 from .batch import batch_context, create_candidate_batch
 from .dependency import dependency_impact
 from .publication import adoption_status, list_publications, record_publication
@@ -37,7 +37,7 @@ from .project import (
 )
 from .connector import connector_status, create_git_connector, sync_git_connector
 from .evidence import bind_evidence, correct_evidence, list_bindings, read_evidence
-from .intake import apply_disposition, audit_intake, intake_source, intake_status, source_pipeline_status
+from .intake import apply_disposition, audit_intake, decide_intake, intake_source, intake_status, source_pipeline_status
 from .node_core import context_budget
 from .review import list_reviews, resolve_review, upsert_review
 from .scope import SourceScope, SourceScopeError
@@ -59,6 +59,7 @@ def main():
     x = sub.add_parser("intake-source"); x.add_argument("root"); x.add_argument("source_id"); x.add_argument("--max-chars", type=int, default=4000)
     x = sub.add_parser("intake-status"); x.add_argument("root"); x.add_argument("intake_id")
     x = sub.add_parser("intake-apply"); x.add_argument("root"); x.add_argument("intake_id"); x.add_argument("chunk_id"); x.add_argument("--status", required=True); x.add_argument("--note"); x.add_argument("--knowledge", action="append", default=[])
+    x = sub.add_parser("intake-decide"); x.add_argument("root"); x.add_argument("intake_id"); x.add_argument("--keep", action="append", default=[]); x.add_argument("--keep-evidence", action="append", default=[]); x.add_argument("--with-knowledge", action="append", default=[], metavar="CHUNK_OR_EVIDENCE:K-ID"); x.add_argument("--reset", action="store_true"); x.add_argument("--keep-all", action="store_true")
     x = sub.add_parser("intake-audit"); x.add_argument("root"); x.add_argument("intake_id")
     x = sub.add_parser("evidence-show"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--raw", action="store_true")
     x = sub.add_parser("evidence-correct"); x.add_argument("root"); x.add_argument("evidence_id"); x.add_argument("--text-file", required=True); x.add_argument("--reason", required=True); x.add_argument("--verified-by", required=True)
@@ -66,7 +67,8 @@ def main():
     x = sub.add_parser("evidence-bindings"); x.add_argument("root"); x.add_argument("--evidence-id"); x.add_argument("--target-id")
     x = sub.add_parser("candidate-create"); x.add_argument("root"); x.add_argument("--proposed-id", required=True); x.add_argument("--title", required=True); x.add_argument("--type", required=True); x.add_argument("--statement", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--scope", default="team")
     x = sub.add_parser("candidate-show"); x.add_argument("root"); x.add_argument("candidate_id")
-    x = sub.add_parser("patch-plan"); x.add_argument("root"); x.add_argument("candidate_id"); x.add_argument("--comparison", required=True); x.add_argument("--summary", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--target-id"); x.add_argument("--target-path")
+    x = sub.add_parser("patch-plan"); x.add_argument("root"); x.add_argument("candidate_id", nargs="?"); x.add_argument("--comparison", required=True); x.add_argument("--summary", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--target-id"); x.add_argument("--target-path")
+    x = sub.add_parser("patch-plan-direct"); x.add_argument("root"); x.add_argument("--knowledge", required=True); x.add_argument("--comparison", required=True); x.add_argument("--summary", required=True); x.add_argument("--statement", required=True); x.add_argument("--evidence", action="append", default=[], metavar="EVIDENCE_ID"); x.add_argument("--title"); x.add_argument("--type", default="rule"); x.add_argument("--owner", default="unassigned"); x.add_argument("--scope", default="team"); x.add_argument("--target-path")
     x = sub.add_parser("patch-context"); x.add_argument("root"); x.add_argument("plan_id")
     x = sub.add_parser("patch-apply"); x.add_argument("root"); x.add_argument("plan_id"); x.add_argument("content_file")
     x = sub.add_parser("batch-create"); x.add_argument("root"); x.add_argument("candidate_ids", nargs="+"); x.add_argument("--title", required=True); x.add_argument("--statement", required=True); x.add_argument("--owner", default="unassigned"); x.add_argument("--scope", default="team")
@@ -142,6 +144,18 @@ def main():
         elif a.cmd == "intake-source": print(intake_source(root, a.source_id, max_chars=a.max_chars))
         elif a.cmd == "intake-status": dump(intake_status(root, a.intake_id))
         elif a.cmd == "intake-apply": dump(apply_disposition(root, a.intake_id, a.chunk_id, status=a.status, note=a.note, knowledge_ids=a.knowledge))
+        elif a.cmd == "intake-decide":
+            with_knowledge: dict[str, list[str]] = {}
+            for item in a.with_knowledge:
+                key, _, kid = str(item).partition(":")
+                if not key or not kid:
+                    raise ValueError(f"--with-knowledge expects CHUNK_OR_EVIDENCE:K-ID, got: {item}")
+                with_knowledge.setdefault(key, []).append(kid)
+            dump(decide_intake(
+                root, a.intake_id,
+                keep=a.keep, keep_evidence=a.keep_evidence,
+                knowledge=with_knowledge, skip_rest=not a.keep_all, reset=a.reset,
+            ))
         elif a.cmd == "intake-audit": dump(audit_intake(root, a.intake_id))
         elif a.cmd == "evidence-show": dump(read_evidence(root, a.evidence_id, corrected=not a.raw))
         elif a.cmd == "evidence-correct":
@@ -154,7 +168,16 @@ def main():
             print(create_candidate(root, proposed_id=a.proposed_id, title=a.title, knowledge_type=a.type, statement=a.statement, owner=a.owner, scope=a.scope))
         elif a.cmd == "candidate-show": dump(candidate_context(root, a.candidate_id))
         elif a.cmd == "patch-plan":
+            if not a.candidate_id:
+                raise ValueError("patch-plan requires a candidate_id (or use patch-plan-direct)")
             print(create_patch_plan(root, a.candidate_id, comparison=a.comparison, summary=a.summary, owner=a.owner, target_knowledge_id=a.target_id, target_path=a.target_path))
+        elif a.cmd == "patch-plan-direct":
+            print(plan_patch(
+                root, knowledge_id=a.knowledge, comparison=a.comparison,
+                summary=a.summary, statement=a.statement, title=a.title,
+                knowledge_type=a.type, evidence_ids=a.evidence, owner=a.owner,
+                scope=a.scope, target_path=a.target_path,
+            )["plan_id"])
         elif a.cmd == "patch-context": dump(patch_plan_context(root, a.plan_id))
         elif a.cmd == "patch-apply": print(apply_patch_plan(root, a.plan_id, Path(a.content_file).resolve()))
         elif a.cmd == "batch-create":
