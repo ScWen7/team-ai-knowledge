@@ -1,0 +1,32 @@
+name: deterministic-tests
+
+on:
+  push:
+    branches: [fix/member-first-complete]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Export tracked review workspace
+        run: git archive --format=tar HEAD > /tmp/team-ai-knowledge.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-workspace
+          path: /tmp/team-ai-knowledge.tar
+          retention-days: 3
+      - name: Install locally
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e .
+      - name: Unit tests
+        run: .venv/bin/python -m unittest discover -s tests -v
